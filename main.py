@@ -37,7 +37,7 @@ class ReferenceFormatterApp(QMainWindow):
 
     # ⚠️ 新增：图标和链接常量
     ICON_PATH = "D:/python/pythonProject10/app_icon.png"
-    GITHUB_URL = "https://github.com/your/repository/link"
+    GITHUB_URL = "https://github.com/rhj-flash/Reference-Formatter-Tool"
     GITHUB_ICON_PATH = "D:/python/pythonProject10/github_icon.ico"
 
     def __init__(self):
