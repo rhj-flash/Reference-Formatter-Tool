@@ -1,6 +1,6 @@
 # Reference-Formatter-Tool
-一个用于格式化并导出 Word 专用学术文献列表的 Python/PyQt6 工具
 
+## EXE文件：https://github.com/rhj-flash/Reference-Formatter-Tool/tree/main/dist
 
 # 📚 文献引用格式化工具 (Word专用)
 
@@ -17,7 +17,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/rhj-flash?style=for-the-badge&logo=github&color=yellow)](https://github.com/rhj-flash)
 [![GitHub Followers](https://img.shields.io/github/followers/rhj-flash?style=for-the-badge&logo=github&color=green)](https://github.com/rhj-flash)
 
-一个基于 PyQt6 开发的智能文献格式化桌面应用程序，专门为学术写作优化，提供完美的 Word 文档兼容性。
+一个基于 PyQt6 开发的智能文献格式化桌面应用程序，专门为学术写作优化，提供 Word 文档兼容性。
 
 **智能分割 · 统一格式 · Word专享 · 中英混排**
 
