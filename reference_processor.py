@@ -2,11 +2,28 @@
 
 import re
 import html
+import os
 from io import StringIO
+
+from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml.ns import qn
 # Pygments components for stable HTML formatting and segmentation
 from pygments.formatters import HtmlFormatter
 from pygments.lexer import RegexLexer
 from pygments.token import Text
+
+# 添加 Word 文档处理相关的导入
+try:
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from htmldocx import HtmlToDocx
+
+    DOCX_AVAILABLE = True
+    print("DEBUG: python-docx and htmldocx imported successfully")
+except ImportError as e:
+    print(f"WARNING: python-docx or htmldocx not available: {e}")
+    DOCX_AVAILABLE = False
 
 # 定义一个字典，用于进行全角到半角的转换
 CHAR_MAPPING = {
@@ -24,7 +41,7 @@ CHAR_MAPPING = {
 }
 
 
-# --- Pygments 自定义 Lexer (无需修改) ---
+# --- Pygments 自定义 Lexer (保持原样) ---
 
 class ReferenceBlockLexer(RegexLexer):
     """
@@ -44,7 +61,7 @@ class ReferenceBlockLexer(RegexLexer):
     }
 
 
-# --- Pygments 自定义 Formatter (无需修改) ---
+# --- Pygments 自定义 Formatter (保持原样) ---
 
 class ReferenceBlockFormatter(HtmlFormatter):
     """
@@ -173,28 +190,12 @@ class ReferenceBlockFormatter(HtmlFormatter):
         if should_return_string:
             return string_buffer.getvalue()
 
+
 class ReferenceProcessor:
     """
     一个专门用于处理和格式化学术文献引用的类。
-    实现了中英文混合字体格式化、多编号格式支持和智能自动分割预览。
+    实现了中英文混合字体格式化、智能自动分割预览和Word导出功能。
     """
-
-    # 定义支持的编号格式及其配置。
-    # ⚠️ 关键修改：只保留格式的描述作为键，移除了“编号”二字
-    SUPPORTED_FORMATS = {
-        "方括号 (推荐，需替换I.为[1])": {
-            "plain_prefix": "[{}] ",
-            "html_type": "upper-roman"
-        },
-        "普通数字 (Word默认)": {
-            "plain_prefix": "{}. ",
-            "html_type": "decimal"
-        },
-        "括号数字 (需替换a.为(1))": {
-            "plain_prefix": "({}) ",
-            "html_type": "lower-alpha"
-        },
-    }
 
     # 定义中英文所需的字体
     CHINESE_FONT = 'SimSun'
@@ -210,24 +211,18 @@ class ReferenceProcessor:
         self.cjk_pattern = re.compile(r'[\u4e00-\u9fff]')
         print("DEBUG: ReferenceProcessor initialized.")
 
-    def get_supported_formats(self) -> dict:
-        """
-        返回支持的格式列表，供UI使用。
-        """
-        return self.SUPPORTED_FORMATS
-
     def process_text(self, raw_text: str, format_name: str) -> tuple[str, str, bool]:
         """
         处理用户输入的完整原始文本。
 
         Args:
             raw_text (str): 原始输入的文献文本。
-            format_name (str): 用户选择的编号格式名称。
+            format_name (str): 格式名称（保留参数，用于兼容性）
 
         Returns:
             tuple[str, str, bool]: (Word HTML输出, UI纯文本输出, 是否成功剥离了现有编号)
         """
-        print(f"DEBUG: Starting to process raw text with format: {format_name}...")
+        print(f"DEBUG: Starting to process raw text...")
 
         if not raw_text.strip():
             print("DEBUG: Raw text is empty.")
@@ -263,17 +258,9 @@ class ReferenceProcessor:
 
         print(f"DEBUG: Stripped existing numbering: {was_stripped}")
 
-        # 获取选定的格式配置
-        format_config = self.SUPPORTED_FORMATS.get(format_name)
-        # ⚠️ 修正了格式配置获取逻辑，如果找不到则使用第一个默认格式
-        if not format_config:
-            print(f"WARNING: Format name '{format_name}' not found. Using default format.")
-            default_key = list(self.SUPPORTED_FORMATS.keys())[0]
-            format_config = self.SUPPORTED_FORMATS[default_key]
-
         # 生成两种格式的文本
-        html_output = self._generate_html_list(styled_html_references, format_config["html_type"])
-        plain_text_output = self._generate_plain_text_list(plain_text_references, format_config["plain_prefix"])
+        html_output = self._generate_html_list(styled_html_references)
+        plain_text_output = self._generate_plain_text_list(plain_text_references)
 
         print("DEBUG: Processing finished. HTML and Plain Text generated.")
         return html_output, plain_text_output, was_stripped
@@ -388,202 +375,94 @@ class ReferenceProcessor:
 
         return "".join(parts)
 
-    def _generate_html_list(self, styled_html_references: list[str], html_type: str) -> str:
+    def _generate_html_list(self, styled_html_references: list[str]) -> str:
         """
-        生成 Word 可识别的 HTML 自动编号列表，确保字体和编号格式正确。
+        生成 Word 可识别的 HTML 自动编号列表，使用Word原生自动编号。
         """
         if not styled_html_references:
             return ""
 
-        # 根据选定的格式设置 CSS 列表样式
-        if html_type == "upper-roman":
-            before_content = "'[' counter(list-counter) '] '"
-            mso_list_type = "mso-list: l0 level1 lfo1;"
-        elif html_type == "lower-alpha":
-            before_content = "'(' counter(list-counter) ') '"
-            mso_list_type = "mso-list: l0 level1 lfo1;"
-        else:  # decimal
-            before_content = "counter(list-counter) '. '"
-            mso_list_type = "mso-list: l0 level1 lfo1;"
+        # 构建列表项 - 使用Word自动编号
+        list_items = []
+        for styled_html_content in styled_html_references:
+            list_item = f'''
+            <li style="margin-bottom: 6pt;">
+                {styled_html_content}
+            </li>
+            '''
+            list_items.append(list_item)
 
-        # 构建列表项
-        list_items = "".join([
-            f'<li style="{mso_list_type} font-family: \'{self.ENGLISH_FONT}\'; '
-            f'mso-hansi-font-family: \'{self.ENGLISH_FONT}\'; '
-            f'mso-bidi-font-family: \'{self.ENGLISH_FONT}\'; '
-            f'mso-ascii-font-family: \'{self.ENGLISH_FONT}\';">'
-            f'{styled_html_content}</li>'
-            for styled_html_content in styled_html_references
-        ])
-
-        # 包含 CSS 样式块
+        # 使用Word原生自动编号的CSS
         style = f"""
         <style>
+            /* Word原生自动编号样式 */
             ol {{
                 list-style-type: none;
-                counter-reset: list-counter;
-                margin-left: 0;
-                padding-left: 35px;
-                font-family: '{self.ENGLISH_FONT}';
-                mso-hansi-font-family: '{self.ENGLISH_FONT}';
-                mso-bidi-font-family: '{self.ENGLISH_FONT}';
-                mso-ascii-font-family: '{self.ENGLISH_FONT}';
+                counter-reset: item;
+                margin: 0;
+                padding: 0;
             }}
             li {{
-                counter-increment: list-counter;
-                margin-bottom: 3px;
-                position: relative;
-                font-family: inherit;
+                display: block;
+                margin-bottom: 6pt;
+                margin-left: 0;
+                padding-left: 24pt;
+                text-indent: -12pt;
             }}
-            li::before {{
-                content: {before_content};
-                position: absolute;
-                left: -35px;
-                width: 30px;
-                text-align: right;
+            li:before {{
+                content: counter(item) ". ";
+                counter-increment: item;
                 display: inline-block;
+                width: 12pt;
+                margin-left: -12pt;
                 font-family: '{self.ENGLISH_FONT}';
-                mso-hansi-font-family: '{self.ENGLISH_FONT}';
-                mso-bidi-font-family: '{self.ENGLISH_FONT}';
-                mso-ascii-font-family: '{self.ENGLISH_FONT}';
+                font-weight: normal;
             }}
-            [style*="mso-list"] {{
-                margin-left: 35px;
-                font-family: '{self.ENGLISH_FONT}';
-                mso-hansi-font-family: '{self.ENGLISH_FONT}';
-                mso-bidi-font-family: '{self.ENGLISH_FONT}';
-                mso-ascii-font-family: '{self.ENGLISH_FONT}';
+            /* 确保Word兼容性 */
+            @list l0:level1 {{
+                mso-level-number-format: decimal;
+                mso-level-text: "%1.";
+                mso-level-tab-stop: 36.0pt;
+                mso-level-number-position: left;
+                margin-left: 36.0pt;
+                text-indent: -18.0pt;
             }}
         </style>
         """
 
-        # 最终的 Word HTML 结构
+        # 最终的 Word HTML 结构 - 使用Word原生列表
         html_string = f"""
         <html xmlns:o="urn:schemas-microsoft-com:office:office"
-              xmlns:w="urn:schemas-microsoft-com:office:word">
+              xmlns:w="urn:schemas-microsoft-com:office:word"
+              xmlns:m="http://schemas.microsoft.com/office/2004/12/omml">
         <head>
             <meta charset="UTF-8">
             {style}
         </head>
         <body>
-        <ol>{list_items}</ol>
+        <!--[if supportLists]>
+        <ol style="list-style-type: decimal;">
+        <![endif]-->
+        <!--[if supportLists]><!-->
+        {'<!--[endif]--><!--[if supportLists]-->'.join(list_items)}
+        <!--[endif]-->
+        <!--[if supportLists]>
+        </ol>
+        <![endif]-->
         </body>
         </html>
         """
         return html_string
 
-    def _generate_plain_text_list(self, references: list, plain_prefix: str) -> str:
+    def _generate_plain_text_list(self, references: list) -> str:
         """
-        生成用于在程序界面中预览的纯文本列表。
+        生成用于在程序界面中预览的纯文本列表，使用自动排序的序号。
         """
         plain_list = [
-            f"{plain_prefix.format(i)}{html.unescape(ref)}"
+            f"{i}. {html.unescape(ref)}"
             for i, ref in enumerate(references, 1)
         ]
         return "\n".join(plain_list)
-
-    def get_split_preview(self, raw_text: str) -> str:
-        """
-        检测潜在的文献块边界，并返回一个包含交替背景色的 HTML 字符串，用于预览区。
-        使用 Pygments 的 Formatter 确保 HTML 渲染的可靠性。
-
-        Args:
-            raw_text (str): 原始输入的文献文本。
-
-        Returns:
-            str: 包含交替颜色分块的 HTML 字符串。
-        """
-        if not raw_text.strip():
-            return ""
-
-        lines = raw_text.split('\n')
-        # 1. 检测边界，返回 (行, 是否为新块开始) 列表
-        lines_with_markers = self._detect_boundary_lines(lines)
-
-        # 2. 初始化 Pygments Formatter。将边界标记数据传递给自定义 Formatter
-        formatter = ReferenceBlockFormatter(lines_with_markers=lines_with_markers)
-
-        # 3. 初始化 Pygments Lexer
-        lexer = ReferenceBlockLexer()
-
-        # 4. 生成 HTML
-        # 使用 formatter.format 并传入 outfile=None 来获取字符串输出
-        html_output = html.unescape(formatter.format(lexer.get_tokens_unprocessed(0, raw_text), outfile=None))
-
-        print("DEBUG: Pygments HTML generation finished.")
-        return html_output
-
-
-    def _is_likely_new_reference(self, line: str) -> bool:
-        """
-        判断一行是否可能是新文献的开始。
-        """
-        new_ref_indicators = [
-            '作者：', '作者:', 'author:', 'authors:', '标题：', '标题:',
-            'title:', 'journal', '期刊', 'vol.', '卷', 'no.', '期',
-            'pp.', '页码', 'pages:', '年', 'year:', 'doi:', 'http'
-        ]
-
-        line_lower = line.lower()
-
-        # 如果包含多个文献特征词，可能是新文献
-        indicator_count = sum(1 for indicator in new_ref_indicators if indicator in line_lower)
-
-        # 同时检查行长度（文献标题通常较短）
-        return indicator_count >= 2 or (len(line.strip()) < 100 and indicator_count >= 1)
-
-    def _detect_number_reset(self, prev_line: str, current_line: str) -> bool:
-        """
-        检测编号是否重置（从高编号跳到低编号）
-        """
-        _, prev_has_num, prev_num = self._strip_numbering(prev_line.strip())
-        _, curr_has_num, curr_num = self._strip_numbering(current_line.strip())
-
-        if prev_has_num and curr_has_num and prev_num > 0 and curr_num > 0:
-            # 如果当前编号明显小于前一个编号（考虑编号重置的情况）
-            if curr_num < prev_num and (prev_num - curr_num) > 5:
-                return True
-
-        return False
-    def _normalize_english_punctuation(self, text: str) -> str:
-        """
-        英文标点规范化：确保使用半角标点
-        """
-        full_to_half = {
-            '，': ',', '。': '.', '：': ':', '；': ';',
-            '？': '?', '！': '!', '（': '(', '）': ')',
-            '【': '[', '】': ']', '―': '-', '–': '-',
-            '—': '-', '．': '.', '·': '.', '∶': ':',
-            '＠': '@', '＃': '#', '＄': '$', '％': '%',
-            '＾': '^', '＆': '&', '＊': '*', '＋': '+',
-            '＝': '=', '～': '~', '　': ' '
-        }
-
-        full_digits = '０１２３４５６７８９'
-        half_digits = '0123456789'
-        digit_mapping = str.maketrans(full_digits, half_digits)
-
-        result = text.translate(digit_mapping)
-        for full, half in full_to_half.items():
-            result = result.replace(full, half)
-
-        return result
-
-    def _normalize_chinese_punctuation(self, text: str) -> str:
-        """
-        中文标点规范化：确保使用全角标点
-        """
-        half_to_full = {
-            ',': '，', '.': '。', ':': '：', ';': '；',
-            '?': '？', '!': '！', '(': '（', ')': '）',
-            '[': '【', ']': '】'
-        }
-
-        result = text
-        for half, full in half_to_full.items():
-            result = result.replace(half, full)
-
-        return result
 
     def get_formatted_split_preview(self, raw_text: str, format_name: str) -> str:
         """
@@ -591,7 +470,7 @@ class ReferenceProcessor:
 
         Args:
             raw_text (str): 原始输入的文献文本
-            format_name (str): 用户选择的编号格式名称
+            format_name (str): 格式名称（保留参数，用于兼容性）
 
         Returns:
             str: 包含格式化后文献分割预览的 HTML 字符串
@@ -668,3 +547,303 @@ class ReferenceProcessor:
                 return True
 
         return False
+
+    def _normalize_english_punctuation(self, text: str) -> str:
+        """
+        英文标点规范化：确保使用半角标点
+        """
+        full_to_half = {
+            '，': ',', '。': '.', '：': ':', '；': ';',
+            '？': '?', '！': '!', '（': '(', '）': ')',
+            '【': '[', '】': ']', '―': '-', '–': '-',
+            '—': '-', '．': '.', '·': '.', '∶': ':',
+            '＠': '@', '＃': '#', '＄': '$', '％': '%',
+            '＾': '^', '＆': '&', '＊': '*', '＋': '+',
+            '＝': '=', '～': '~', '　': ' '
+        }
+
+        full_digits = '０１２３４５６７８９'
+        half_digits = '0123456789'
+        digit_mapping = str.maketrans(full_digits, half_digits)
+
+        result = text.translate(digit_mapping)
+        for full, half in full_to_half.items():
+            result = result.replace(full, half)
+
+        return result
+
+    def _normalize_chinese_punctuation(self, text: str) -> str:
+        """
+        中文标点规范化：确保使用全角标点
+        """
+        half_to_full = {
+            ',': '，', '.': '。', ':': '：', ';': '；',
+            '?': '？', '!': '！', '(': '（', ')': '）',
+            '[': '【', ']': '】'
+        }
+
+        result = text
+        for half, full in half_to_full.items():
+            result = result.replace(half, full)
+
+        return result
+
+    def export_to_word_file_with_custom_font(self, html_content: str, file_path: str,
+                                             format_config: dict, numbering_format: str,
+                                             english_font: str, english_size: float,
+                                             chinese_font: str, chinese_size: float) -> bool:
+        """
+        使用自定义字体设置导出Word文件，使用Word原生自动编号。
+        """
+        try:
+            if not DOCX_AVAILABLE:
+                raise ImportError("python-docx 或 htmldocx 库未安装，无法生成Word文件")
+
+            print(f"DEBUG: Starting Word export with HTML content length: {len(html_content)}")
+
+            # 检查文件是否被其他程序占用
+            if os.path.exists(file_path):
+                try:
+                    # 尝试打开文件检查是否被占用
+                    with open(file_path, 'a') as f:
+                        pass
+                except IOError as e:
+                    raise PermissionError(f"文件 {file_path} 可能被其他程序占用，请关闭后重试: {e}")
+
+            # 创建新的Word文档
+            doc = Document()
+
+            # 设置自定义字体
+            self._setup_custom_font_styles(doc, format_config, english_font, english_size, chinese_font, chinese_size)
+
+            # 添加标题
+            title = doc.add_heading('参考文献', 0)
+
+            # 设置标题对齐方式
+            try:
+                alignment_map = {
+                    "center": WD_ALIGN_PARAGRAPH.CENTER,
+                    "left": WD_ALIGN_PARAGRAPH.LEFT,
+                    "right": WD_ALIGN_PARAGRAPH.RIGHT,
+                    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY
+                }
+                alignment = alignment_map.get(format_config.get("title_alignment", "center"), WD_ALIGN_PARAGRAPH.CENTER)
+                title.alignment = alignment
+            except Exception as e:
+                print(f"WARNING: Error setting title alignment: {e}")
+                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # 设置标题格式
+            title_run = title.runs[0]
+            title_run.font.size = Pt(format_config.get("title_font_size", 16))
+            title_run.font.name = english_font
+            title_run._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
+
+            # 添加一个空行
+            empty_para = doc.add_paragraph()
+            empty_para.paragraph_format.space_after = Pt(format_config.get("title_margin_bottom", 20))
+
+            # 从HTML内容中提取文献条目
+            references = self._extract_references_from_html(html_content)
+
+            print(f"DEBUG: Exporting {len(references)} references to Word")
+
+            # 添加参考文献 - 使用Word自动编号
+            for i, reference in enumerate(references, 1):
+                if reference and reference.strip():
+                    # 创建段落并添加到自动编号列表
+                    paragraph = doc.add_paragraph(style='List Number')
+
+                    # 添加文献内容（使用自定义字体）
+                    self._improved_mixed_font_text_custom(paragraph, reference,
+                                                          english_font, english_size,
+                                                          chinese_font, chinese_size)
+
+                    # 设置段落格式
+                    paragraph_format = paragraph.paragraph_format
+                    paragraph_format.line_spacing = format_config.get("line_spacing", 1.5)
+                    paragraph_format.space_after = Pt(format_config.get("item_spacing", 6))
+
+                    # 设置悬挂缩进
+                    paragraph_format.first_line_indent = Pt(-format_config.get("hanging_indent", 2) * 12)
+                    paragraph_format.left_indent = Pt(format_config.get("hanging_indent", 2) * 12)
+                else:
+                    print(f"DEBUG: Skipping empty reference at index {i}")
+
+            # 保存文档 - 添加重试机制
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    doc.save(file_path)
+                    print(f"DEBUG: Word file saved successfully to {file_path}")
+                    return True
+                except PermissionError as e:
+                    if attempt < max_retries - 1:
+                        print(f"WARNING: Permission denied on attempt {attempt + 1}, retrying...")
+                        import time
+                        time.sleep(1)  # 等待1秒后重试
+                    else:
+                        raise e
+
+        except PermissionError as e:
+            print(f"ERROR: Permission denied when saving Word file: {str(e)}")
+            # 提供更友好的错误信息
+            error_msg = f"无法保存文件到 {file_path}。可能的原因：\n1. 文件正在被其他程序（如Word）打开\n2. 没有写入权限\n3. 文件路径不存在\n请关闭文件或检查权限后重试。"
+            raise PermissionError(error_msg)
+        except Exception as e:
+            print(f"ERROR: Failed to export Word file with custom font: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _setup_custom_font_styles(self, doc, format_config, english_font, english_size, chinese_font, chinese_size):
+        """设置自定义字体样式"""
+        try:
+            # 设置默认样式
+            style = doc.styles['Normal']
+            font = style.font
+            font.name = english_font
+            font.size = Pt(english_size)
+
+            # 设置东亚字体（中文字体）
+            font._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
+
+            # 设置列表样式
+            try:
+                # 尝试获取或创建列表样式
+                list_style = doc.styles.add_style('ReferenceList', WD_STYLE_TYPE.PARAGRAPH)
+                list_style.base_style = doc.styles['List Number']
+                list_font = list_style.font
+                list_font.name = english_font
+                list_font.size = Pt(english_size)
+                list_font._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
+            except Exception as e:
+                print(f"WARNING: Error setting list style: {e}")
+
+            # 设置页面边距
+            sections = doc.sections
+            for section in sections:
+                section.top_margin = Inches(1)
+                section.bottom_margin = Inches(1)
+                section.left_margin = Inches(1)
+                section.right_margin = Inches(1)
+        except Exception as e:
+            print(f"WARNING: Error in font setup: {e}")
+
+    def _improved_mixed_font_text_custom(self, paragraph, text, english_font, english_size, chinese_font, chinese_size):
+        """
+        使用自定义字体的改进中英文混合字体设置方法。
+        """
+        try:
+            chinese_chars = []
+            english_chars = []
+            current_type = None
+
+            for char in text:
+                if self._is_chinese_char(char):
+                    char_type = 'chinese'
+                elif char.isalpha() or char.isdigit() or char in ' .,;:!?\'"()-':
+                    char_type = 'english'
+                else:
+                    char_type = 'chinese'
+
+                if current_type != char_type:
+                    if chinese_chars or english_chars:
+                        self._add_text_segment_custom(paragraph, chinese_chars, english_chars,
+                                                      english_font, english_size, chinese_font, chinese_size)
+                        chinese_chars = []
+                        english_chars = []
+                    current_type = char_type
+
+                if char_type == 'chinese':
+                    chinese_chars.append(char)
+                else:
+                    english_chars.append(char)
+
+            if chinese_chars or english_chars:
+                self._add_text_segment_custom(paragraph, chinese_chars, english_chars,
+                                              english_font, english_size, chinese_font, chinese_size)
+        except Exception as e:
+            print(f"WARNING: Error in mixed font text: {e}")
+            # 如果出错，直接添加文本
+            paragraph.add_run(text)
+
+    def _add_text_segment_custom(self, paragraph, chinese_chars, english_chars,
+                                 english_font, english_size, chinese_font, chinese_size):
+        """使用自定义字体添加文本片段"""
+        try:
+            if chinese_chars:
+                chinese_text = ''.join(chinese_chars)
+                run = paragraph.add_run(chinese_text)
+                run.font.name = chinese_font
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
+                run.font.size = Pt(chinese_size)
+
+            if english_chars:
+                english_text = ''.join(english_chars)
+                run = paragraph.add_run(english_text)
+                run.font.name = english_font
+                run.font.size = Pt(english_size)
+        except Exception as e:
+            print(f"WARNING: Error adding text segment: {e}")
+
+    def _is_chinese_char(self, char):
+        """判断字符是否为中文字符"""
+        # 基本CJK统一汉字
+        if '\u4e00' <= char <= '\u9fff':
+            return True
+        # CJK扩展A
+        if '\u3400' <= char <= '\u4dbf':
+            return True
+        # 中文标点符号
+        if char in '，。！？；：「」『』【】（）《》':
+            return True
+        return False
+
+    def _extract_references_from_html(self, html_content):
+        """
+        从HTML内容中提取参考文献列表。
+        """
+        try:
+            # 提取body内容
+            body_content = self._extract_body_content(html_content)
+
+            # 使用正则表达式提取列表项内容
+            references = []
+            li_pattern = re.compile(r'<li[^>]*>(.*?)</li>', re.DOTALL | re.IGNORECASE)
+
+            for match in li_pattern.finditer(body_content):
+                li_content = match.group(1)
+
+                # 移除HTML标签但保留文本内容
+                clean_text = re.sub('<[^<]+?>', '', li_content)
+                # 解码HTML实体
+                clean_text = html.unescape(clean_text)
+                # 移除多余的空白字符
+                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+                if clean_text:
+                    references.append(clean_text)
+
+            print(f"DEBUG: Extracted {len(references)} references from HTML")
+            return references
+
+        except Exception as e:
+            print(f"WARNING: Error extracting references from HTML: {e}")
+            return ["文献内容提取失败"]
+
+    def _extract_body_content(self, html_content: str) -> str:
+        """
+        从完整的HTML内容中提取body部分。
+        """
+        try:
+            # 使用正则表达式提取body内容
+            body_match = re.search(r'<body[^>]*>(.*?)</body>', html_content, re.DOTALL | re.IGNORECASE)
+            if body_match:
+                return body_match.group(1).strip()
+            else:
+                # 如果没有body标签，返回原始内容
+                return html_content
+        except Exception as e:
+            print(f"WARNING: Error extracting body content: {e}")
+            return html_content
