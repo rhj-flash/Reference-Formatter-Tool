@@ -146,9 +146,9 @@ class ReferenceBlockFormatter(HtmlFormatter):
                     )
                     block_content.append(line_html)
 
-            # 包装整个文献块
+            # 包装整个文献块（移除 box-shadow，避免不兼容属性）
             return (
-                f'<div style="margin: 25px 0; border-radius: 8px; box-shadow: 0 3px 6px rgba(0,0,0,0.1);">'
+                f'<div style="margin: 25px 0; border-radius: 8px;">'
                 f'{block_header}'
                 f'<div style="background-color: {style["bg_color"]}; '
                 f'border: 2px solid {style["border_color"]}; border-top: none; '

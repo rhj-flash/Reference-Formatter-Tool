@@ -11,19 +11,100 @@ try:
     from pygments.formatters import HtmlFormatter
     from pygments.lexer import RegexLexer
     from pygments.token import Text
-    print("DEBUG: Pygments imported successfully")
+    print("DEBUG: Pygments imported successfully")      
 except ImportError as e:
     print(f"ERROR: Pygments import failed: {e}")
     sys.exit(1)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QPushButton, QLabel, QMessageBox, QFrame, QSizePolicy, QFileDialog, QComboBox
+    QTextEdit, QPushButton, QLabel, QMessageBox, QFrame, QSizePolicy, QFileDialog, QComboBox,
+    QStyleOption, QStyle
 )
-from PyQt6.QtGui import QFont, QColor, QIcon, QDesktopServices
-from PyQt6.QtCore import QMimeData, Qt, QUrl
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QPainter
+from PyQt6.QtCore import QMimeData, Qt, QUrl, QTimer, QSize
 
 # 从我们创建的模块中导入核心处理类
 from reference_processor import ReferenceProcessor, DOCX_AVAILABLE
+from styles import build_main_window_qss, DIALOG_QSS
+
+
+class MarqueeLabel(QLabel):
+    """单行滚动标签，文本超出时自动滚动显示。"""
+
+    def __init__(self, text="", parent=None, interval=35, step=2, gap="    "):
+        super().__init__(text, parent)
+        self._full_text = text or ""
+        self._interval = interval
+        self._step = step
+        self._gap = gap
+        self._offset = 0
+        self._need_scroll = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_offset)
+        self._padding = 12
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.setContentsMargins(self._padding, 0, self._padding, 0)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def setText(self, text):
+        self._full_text = text or ""
+        super().setText(self._full_text)
+        self._offset = 0
+        self._evaluate_scroll()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._evaluate_scroll()
+
+    def paintEvent(self, event):
+        if not self._need_scroll:
+            super().paintEvent(event)
+            return
+
+        option = QStyleOption()
+        option.initFrom(self)
+
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setPen(self.palette().windowText().color())
+
+        rect = self.rect().adjusted(self._padding, 0, -self._padding, 0)
+        painter.setClipRect(rect)
+        text = self._full_text + self._gap
+        text_width = self.fontMetrics().horizontalAdvance(text)
+        baseline = int(
+            rect.center().y()
+            + (self.fontMetrics().ascent() - self.fontMetrics().descent()) / 2
+        )
+
+        x = rect.left() - self._offset
+        while x < rect.right():
+            painter.drawText(x, baseline, text)
+            x += text_width
+
+    def _evaluate_scroll(self):
+        available = max(1, self.width() - 2 * self._padding)
+        text_width = self.fontMetrics().horizontalAdvance(self._full_text)
+        if text_width > available:
+            if not self._timer.isActive():
+                self._timer.start(self._interval)
+            self._need_scroll = True
+        else:
+            self._need_scroll = False
+            if self._timer.isActive():
+                self._timer.stop()
+            self._offset = 0
+        self.update()
+
+    def _update_offset(self):
+        text = self._full_text + self._gap
+        width = self.fontMetrics().horizontalAdvance(text)
+        if width == 0:
+            return
+        self._offset = (self._offset + self._step) % width
+        self.update()
 
 
 class ReferenceFormatterApp(QMainWindow):
@@ -54,30 +135,6 @@ class ReferenceFormatterApp(QMainWindow):
         self.initUI()
         self._apply_global_style()  # 应用全局样式
 
-        # 新增：创建并添加 GitHub 图标操作
-        self._create_github_action()
-        print("DEBUG: GitHub Action added to menu bar.")
-
-    # 新增：创建 GitHub 链接的 Action
-    def _create_github_action(self):
-        """
-        在菜单栏(或工具栏)添加一个可点击的 GitHub 图标。
-        使用 QToolBar 实现一个不含文字，仅含图标的按钮。
-        """
-        # 1. 创建工具栏
-        toolbar = self.addToolBar("External Links")
-        toolbar.setObjectName("ExternalLinksToolbar")
-        toolbar.setMovable(False)  # 禁止用户拖动工具栏
-        toolbar.setStyleSheet("QToolBar { padding: 0px; margin: 0px; border: none; }")
-
-        # 2. 创建 Action (可点击的图标)
-        github_action = toolbar.addAction(QIcon(self.GITHUB_ICON_PATH), "GitHub")
-        github_action.setToolTip("访问 GitHub 仓库")
-
-        # 3. 连接到槽函数
-        github_action.triggered.connect(self._open_github_link)
-
-    # 新增：打开 GitHub 链接的槽函数
     def _open_github_link(self):
         """打开 GitHub 仓库链接。"""
         QDesktopServices.openUrl(QUrl(self.GITHUB_URL))
@@ -87,169 +144,43 @@ class ReferenceFormatterApp(QMainWindow):
         """
         应用一套大胆、优雅、淡雅的全局 QSS 样式 (Glassmorphism 玻璃磨砂风格)。
         """
-        # 定义核心莫兰迪颜色
-        COLOR_BACKGROUND = "white"
-        COLOR_CARD_BG = "white"
-        COLOR_TEXT_DARK = "#33415c"
-        COLOR_TEXT_LIGHT = "#7f8c8d"
-        COLOR_BORDER = "#d8e1e8"
-
-        # Glassmorphism 按钮核心颜色
-        COLOR_PREVIEW_RGBA = "rgba(162, 185, 188, 0.6)"
-        COLOR_PROCESS_RGBA = "rgba(197, 197, 138, 0.6)"
-        COLOR_COPY_RGBA = "rgba(216, 167, 134, 0.6)"
-        COLOR_EXPORT_RGBA = "rgba(134, 167, 216, 0.6)"
-
-        # 悬停时颜色
-        COLOR_PREVIEW_HOVER = "rgba(162, 185, 188, 0.8)"
-        COLOR_PROCESS_HOVER = "rgba(197, 197, 138, 0.8)"
-        COLOR_COPY_HOVER = "rgba(216, 167, 134, 0.8)"
-        COLOR_EXPORT_HOVER = "rgba(134, 167, 216, 0.8)"
-
-        qss = f"""
-            QMainWindow {{
-                background-color: {COLOR_BACKGROUND};
-            }}
-            QWidget#centralWidget {{
-                background-color: {COLOR_BACKGROUND};
-            }}
-            QLabel {{
-                color: {COLOR_TEXT_DARK};
-                font-size: 10pt;
-            }}
-            /* 标题样式 */
-            QLabel#TitleLabel {{
-                font-size: 18pt;
-                font-weight: bold;
-                color: {COLOR_TEXT_DARK}; 
-                padding: 20px 0 15px 0;
-            }}
-            /* 提示/状态标签样式 */
-            QLabel#StatusLabel {{
-                color: {COLOR_TEXT_DARK};
-                font-weight: 500;
-                font-size: 10pt;
-                padding: 12px;
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                background-color: {COLOR_CARD_BG};
-                margin-top: 10px;
-            }}
-            /* 输入/输出区域样式 - 卡片设计 */
-            QTextEdit {{
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 10px;
-                padding: 15px;
-                background-color: {COLOR_CARD_BG};
-                font-size: 10pt;
-                line-height: 1.5;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
-            }}
-            QTextEdit:focus {{
-                border: 1px solid rgba(162, 185, 188, 1.0);
-            }}
-            QTextEdit#output_text {{
-                background-color: #f7f9fc;
-            }}
-            /* 控制面板框架样式 - 模拟与主窗口的统一 */
-            QFrame#ControlPanel {{
-                background-color: {COLOR_BACKGROUND};
-                border: none;
-                border-radius: 12px;
-                padding: 20px;
-                box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08); 
-            }}
-            /* 按钮通用样式 - 玻璃磨砂质感 */
-            QPushButton {{
-                color: {COLOR_TEXT_DARK};
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                padding: 14px 15px;
-                border-radius: 12px;
-                font-weight: 600;
-                font-size: 10pt;
-                min-height: 35px;
-                text-align: left;
-                margin-bottom: 12px;
-                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1),
-                            0 0 0 1px rgba(255, 255, 255, 0.5) inset; 
-            }}
-            QPushButton:hover {{
-                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15); 
-            }}
-            QPushButton:pressed {{
-                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-                padding-top: 15px;
-            }}
-
-            /* 步骤 1: 预览按钮 */
-            QPushButton#PreviewButton {{
-                background-color: {COLOR_PREVIEW_RGBA};
-            }}
-            QPushButton#PreviewButton:hover {{
-                background-color: {COLOR_PREVIEW_HOVER};
-            }}
-            /* 步骤 2: 格式化按钮 */
-            QPushButton#ProcessButton {{
-                background-color: {COLOR_PROCESS_RGBA};
-            }}
-            QPushButton#ProcessButton:hover {{
-                background-color: {COLOR_PROCESS_HOVER};
-            }}
-            /* 步骤 3: 复制按钮 */
-            QPushButton#CopyButton {{
-                background-color: {COLOR_COPY_RGBA};
-            }}
-            QPushButton#CopyButton:hover {{
-                background-color: {COLOR_COPY_HOVER};
-            }}
-            /* 步骤 4: 导出Word文件按钮 */
-            QPushButton#ExportButton {{
-                background-color: {COLOR_EXPORT_RGBA};
-            }}
-            QPushButton#ExportButton:hover {{
-                background-color: {COLOR_EXPORT_HOVER};
-            }}
-            /* 禁用按钮样式 */
-            QPushButton:disabled {{
-                background-color: {COLOR_BORDER};
-                color: {COLOR_TEXT_LIGHT};
-                border: 1px solid {COLOR_BORDER};
-                box-shadow: none;
-            }}
-            QLabel#FormatInfo {{
-                font-size: 9pt;
-                color: {COLOR_TEXT_LIGHT};
-                padding: 10px 0 0 0;
-            }}
-            /* 下拉框样式 */
-            QComboBox {{
-                border: 1px solid #d8e1e8;
-                border-radius: 6px;
-                padding: 8px 12px;
-                background-color: white;
-                font-size: 10pt;
-                min-height: 35px;
-                margin-bottom: 10px;
-            }}
-            QComboBox:focus {{
-                border: 1px solid rgba(162, 185, 188, 1.0);
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #33415c;
-                width: 0px;
-                height: 0px;
-            }}
-        """
         # 设置全局字体，确保中文显示 (Windows 推荐使用 Microsoft YaHei UI)
         font = QFont("Microsoft YaHei UI", 10)
         self.setFont(font)
-        self.setStyleSheet(qss)
+        self.setStyleSheet(build_main_window_qss())
+
+    def _create_hero_card(self):
+        """创建顶部的介绍卡片，展示图标、标题和描述。"""
+        hero_card = QFrame()
+        hero_card.setObjectName("HeroCard")
+        hero_layout = QHBoxLayout(hero_card)
+        hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(4)
+
+        icon_label = QLabel()
+        pixmap = QPixmap(self.ICON_PATH)
+        if not pixmap.isNull():
+            icon_label.setPixmap(pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation))
+        hero_layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label = QLabel("📚 文献列表格式化工具")
+        title_label.setObjectName("TitleLabel")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_layout.addWidget(title_label)
+
+        subtitle = QLabel("4 步完成从杂乱引用到正式 Word 交付的全流程，让排版、字体、缩进一次搞定。")
+        subtitle.setObjectName("HeroSubtitle")
+        subtitle.setWordWrap(False)
+        subtitle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        subtitle.setMaximumHeight(subtitle.fontMetrics().height() + 6)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_layout.addWidget(subtitle)
+
+        hero_layout.addLayout(text_layout, stretch=1)
+        return hero_card
 
     def initUI(self):
         """
@@ -258,24 +189,33 @@ class ReferenceFormatterApp(QMainWindow):
         self.setWindowTitle('文献引用格式化工具')
 
         # 设置更舒适的窗口尺寸比例
-        window_width = 1200  # 增加宽度以更好地显示内容
-        window_height = 700  # 稍微降低高度，更舒适的比例
-        self.setGeometry(100, 100, window_width, window_height)
+        window_width = 1040
+        window_height = 500
+        self.resize(window_width, window_height)
 
-        # 窗口居中逻辑 - 改进版本
-        screen_geometry = QApplication.primaryScreen().geometry()
-        screen_width = screen_geometry.width()
-        screen_height = screen_geometry.height()
+        # 窗口居中逻辑：使用整块屏幕区域的宽高来计算，使窗口在视觉上居中
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            screen_geometry = screen.geometry()
+            desktop_width = screen_geometry.width()
+            desktop_height = screen_geometry.height()
 
-        # 计算居中位置
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 5
+            # 使用当前窗口的实际宽高进行居中（包含窗口边框在内）
+            frame_geo = self.frameGeometry()
+            window_w = frame_geo.width() or window_width
+            window_h = frame_geo.height() or window_height
 
-        # 确保窗口不会超出屏幕边界
-        x = max(0, min(x, screen_width - window_width))
-        y = max(0, min(y, screen_height - window_height))
+            x = screen_geometry.x() + max(0, (desktop_width - window_w) // 2)
+            # 在几何中心的基础上再向上偏移一段距离，使窗口看起来更接近屏幕正中而不是偏底部
+            base_y = screen_geometry.y() + max(0, (desktop_height - window_h) // 2)
+            y = max(screen_geometry.y(), base_y - 80)
 
-        self.move(x, y)
+            # 调试输出：桌面尺寸、窗口尺寸和最终位置
+            print(f"DEBUG: Desktop size = {desktop_width}x{desktop_height}")
+            print(f"DEBUG: Window size  = {window_w}x{window_h}")
+            print(f"DEBUG: Move window to x={x}, y={y}")
+
+            self.move(x, y)
 
         central_widget = QWidget()
         central_widget.setObjectName("centralWidget")
@@ -283,22 +223,51 @@ class ReferenceFormatterApp(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
 
         # 调整边距和间距，使布局更紧凑
-        main_layout.setContentsMargins(25, 15, 25, 20)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(18, 10, 18, 12)
+        main_layout.setSpacing(10)
 
-        # 标题
-        title_label = QLabel("📚 文献列表格式化工具")
-        title_label.setObjectName("TitleLabel")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title_label)
+        # 顶部介绍卡片
+        main_layout.addWidget(self._create_hero_card())
 
         # --- 字体设置面板 - 调整布局 ---
         font_settings_layout = QHBoxLayout()
-        font_settings_layout.setSpacing(12)
+        font_settings_layout.setSpacing(8)
 
         # 英文字体设置
-        english_font_layout = QVBoxLayout()
-        english_font_layout.addWidget(QLabel("英文字体"))
+        english_font_layout = QHBoxLayout()
+        english_font_layout.setContentsMargins(0, 0, 0, 0)
+        english_font_layout.setSpacing(6)
+        english_font_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # 先放置 GitHub 按钮在最左侧
+        github_button = QPushButton()
+        github_button.setIcon(QIcon(self.GITHUB_ICON_PATH))
+        github_button.setIconSize(QSize(20, 20))
+        github_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 加宽按钮，让图标左右留白多一些
+        github_button.setFixedSize(28, 28)
+
+        github_button.setToolTip("访问 GitHub 仓库")
+        github_button.setFlat(True)
+        # 通过不对称 padding 让图标在按钮内部略微左移
+        github_button.setStyleSheet(
+            "QPushButton { border: none; background-color: transparent; padding-left: 4px; padding-right: 12px; }"
+            "QPushButton:hover { background-color: rgba(0,0,0,0.05); border-radius: 14px; }"
+            "QPushButton:pressed { background-color: rgba(0,0,0,0.08); }"
+        )
+
+        github_button.clicked.connect(self._open_github_link)
+        english_font_layout.addWidget(github_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # GitHub 按钮右侧预留一段固定空白，用于视觉分隔
+        english_font_layout.addSpacing(20)
+
+        # 中间放“英文字体”文字和下拉框
+        english_font_label = QLabel("英文字体：")
+        english_font_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        english_font_label.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        english_font_layout.addWidget(english_font_label)
+
         self.english_font_combo = QComboBox()
         self.english_font_combo.addItems([
             "Times New Roman",
@@ -309,19 +278,29 @@ class ReferenceFormatterApp(QMainWindow):
             "Verdana"
         ])
         self.english_font_combo.setCurrentText("Times New Roman")
+        self.english_font_combo.setFixedHeight(34)
         english_font_layout.addWidget(self.english_font_combo)
 
         # 英文字号
-        english_size_layout = QVBoxLayout()
-        english_size_layout.addWidget(QLabel("英文字号"))
+        english_size_layout = QHBoxLayout()
+        english_size_label = QLabel("英文字号：")
+        english_size_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        english_size_label.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        english_size_layout.addWidget(english_size_label)
+
         self.english_size_combo = QComboBox()
         self.english_size_combo.addItems(["10", "10.5", "11", "12", "14", "16", "18"])
         self.english_size_combo.setCurrentText("12")
+        self.english_size_combo.setFixedHeight(34)
         english_size_layout.addWidget(self.english_size_combo)
 
         # 中文字体设置
-        chinese_font_layout = QVBoxLayout()
-        chinese_font_layout.addWidget(QLabel("中文字体"))
+        chinese_font_layout = QHBoxLayout()
+        chinese_font_label = QLabel("中文字体：")
+        chinese_font_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        chinese_font_label.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        chinese_font_layout.addWidget(chinese_font_label)
+
         self.chinese_font_combo = QComboBox()
         self.chinese_font_combo.addItems([
             "宋体",
@@ -332,14 +311,20 @@ class ReferenceFormatterApp(QMainWindow):
             "华文宋体"
         ])
         self.chinese_font_combo.setCurrentText("宋体")
+        self.chinese_font_combo.setFixedHeight(34)
         chinese_font_layout.addWidget(self.chinese_font_combo)
 
         # 中文字号
-        chinese_size_layout = QVBoxLayout()
-        chinese_size_layout.addWidget(QLabel("中文字号"))
+        chinese_size_layout = QHBoxLayout()
+        chinese_size_label = QLabel("中文字号：")
+        chinese_size_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        chinese_size_label.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        chinese_size_layout.addWidget(chinese_size_label)
+
         self.chinese_size_combo = QComboBox()
         self.chinese_size_combo.addItems(["10", "10.5", "11", "12", "14", "16", "18"])
         self.chinese_size_combo.setCurrentText("12")
+        self.chinese_size_combo.setFixedHeight(34)
         chinese_size_layout.addWidget(self.chinese_size_combo)
 
         # 将所有字体设置添加到水平布局
@@ -359,10 +344,10 @@ class ReferenceFormatterApp(QMainWindow):
         control_panel = QFrame()
         control_panel.setObjectName("ControlPanel")
         control_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        control_panel.setFixedWidth(280)  # 稍微减小宽度
+        control_panel.setFixedWidth(260)
         control_panel_layout = QVBoxLayout(control_panel)
         control_panel_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        control_panel_layout.setSpacing(12)  # 减少内部间距
+        control_panel_layout.setSpacing(8)
 
         # 1. 操作步骤标题
         control_panel_layout.addWidget(QLabel("➡️ **格式化流程 (4 步)**"))
@@ -372,29 +357,29 @@ class ReferenceFormatterApp(QMainWindow):
         self.preview_button = QPushButton("1. 检查文献分割")
         self.preview_button.setObjectName("PreviewButton")
         self.preview_button.clicked.connect(self.split_preview)
-        self.preview_button.setFixedHeight(40)  # 设置固定高度
+        self.preview_button.setMinimumHeight(42)
         control_panel_layout.addWidget(self.preview_button)
 
         self.process_button = QPushButton("2. 统一格式并清洗")
         self.process_button.setObjectName("ProcessButton")
         self.process_button.clicked.connect(self.process_references)
-        self.process_button.setFixedHeight(40)
+        self.process_button.setMinimumHeight(42)
         control_panel_layout.addWidget(self.process_button)
 
         self.copy_button = QPushButton("3. 复制 Word 专用格式")
         self.copy_button.setObjectName("CopyButton")
         self.copy_button.clicked.connect(self.copy_to_clipboard)
-        self.copy_button.setFixedHeight(40)
+        self.copy_button.setMinimumHeight(42)
         control_panel_layout.addWidget(self.copy_button)
 
         # 3. 生成Word文件按钮
         self.export_button = QPushButton("4. 生成 Word 文件")
         self.export_button.setObjectName("ExportButton")
         self.export_button.clicked.connect(self.export_to_word_file)
-        self.export_button.setFixedHeight(40)
+        self.export_button.setMinimumHeight(42)
         control_panel_layout.addWidget(self.export_button)
 
-        control_panel_layout.addSpacing(15)
+        control_panel_layout.addSpacing(10)
 
         # 4. 当前字体设置显示
         font_info_label = QLabel(
@@ -404,23 +389,24 @@ class ReferenceFormatterApp(QMainWindow):
         )
         font_info_label.setObjectName("FormatInfo")
         font_info_label.setWordWrap(True)
-        font_info_label.setFixedHeight(80)  # 固定高度
-        control_panel_layout.addWidget(font_info_label)
+        font_info_label.setFixedHeight(58)
+        self.font_info_label = font_info_label
+        control_panel_layout.addWidget(self.font_info_label)
 
         control_panel_layout.addStretch(1)
 
         # 5. 提示
-        self.status_label = QLabel("💡 状态: 等待用户输入原始文献。")
+        self.status_label = MarqueeLabel("💡 状态: 等待用户输入原始文献。")
         self.status_label.setObjectName("StatusLabel")
-        self.status_label.setWordWrap(True)
-        self.status_label.setFixedHeight(80)  # 固定高度
+        self.status_label.setFixedHeight(40)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         control_panel_layout.addWidget(self.status_label)
 
         content_layout.addWidget(control_panel)
 
         # --- 右侧输入/输出区域 - 调整比例 ---
         io_area_layout = QVBoxLayout()
-        io_area_layout.setSpacing(12)  # 减少间距
+        io_area_layout.setSpacing(10)
 
         # 输入区域
         input_label = QLabel("📝 **原始文献输入区**")
@@ -428,7 +414,8 @@ class ReferenceFormatterApp(QMainWindow):
         self.input_text = QTextEdit()
         self.input_text.setPlaceholderText("请将文献列表粘贴到此处。程序将自动处理乱码、多行和旧编号...")
         self.input_text.setFont(QFont("Courier New", 10))
-        self.input_text.setMinimumHeight(200)  # 设置最小高度
+        self.input_text.setMinimumHeight(90)
+        self.input_text.setFrameShape(QFrame.Shape.NoFrame)
         io_area_layout.addWidget(self.input_text, 1)  # 权重为2
 
         # 输出/预览区域
@@ -438,7 +425,8 @@ class ReferenceFormatterApp(QMainWindow):
         self.output_text.setObjectName("output_text")
         self.output_text.setReadOnly(True)
         self.output_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.output_text.setMinimumHeight(200)  # 设置最小高度
+        self.output_text.setMinimumHeight(120)
+        self.output_text.setFrameShape(QFrame.Shape.NoFrame)
         io_area_layout.addWidget(self.output_text, 1)  # 权重为3，比输入区域稍大
 
         content_layout.addLayout(io_area_layout, 1)
@@ -453,9 +441,8 @@ class ReferenceFormatterApp(QMainWindow):
 
     def update_font_info(self):
         """更新字体设置显示"""
-        font_info_label = self.findChild(QLabel)  # 简化查找，实际应该保存引用
-        if font_info_label and hasattr(font_info_label, 'text') and "当前字体设置" in font_info_label.text():
-            font_info_label.setText(
+        if hasattr(self, "font_info_label") and self.font_info_label:
+            self.font_info_label.setText(
                 f"**当前字体设置:**\n"
                 f"• 英文: {self.english_font_combo.currentText()} {self.english_size_combo.currentText()}pt\n"
                 f"• 中文: {self.chinese_font_combo.currentText()} {self.chinese_size_combo.currentText()}pt"
@@ -474,22 +461,6 @@ class ReferenceFormatterApp(QMainWindow):
         """
         第一步：调用处理器生成分割预览 HTML。
         """
-        # 样式修改：按钮背景颜色淡化 (使用浅灰蓝 #e0eaf1)
-        DIALOG_QSS = (
-            "QMessageBox { background-color: white; padding: 20px; }"
-            "QLabel { margin-top: 5px; margin-bottom: 5px; }"
-            # 针对 QMessageBox 中的 QPushButton 进行样式调整
-            "QMessageBox QPushButton {"
-            "background-color: #e0eaf1; "  # 淡雅的浅灰蓝
-            "color: #33415c; "  # 使用深色文本，保证可读性
-            "border: 1px solid #c8d3db; "  # 浅色边框
-            "border-radius: 4px; "
-            "padding: 5px 15px;"
-            "}"
-            # 悬停效果保持默认或略微加深
-            "QMessageBox QPushButton:hover { background-color: #d1dde8; }"
-        )
-
         raw_text = self.input_text.toPlainText()
         if not raw_text.strip():
             self.status_label.setText("⚠️ 输入为空，请粘贴文献文本。")
@@ -547,20 +518,6 @@ class ReferenceFormatterApp(QMainWindow):
         """
         第二步：调用处理器进行完整的格式化，并存储 Word HTML 结果。
         """
-        # 样式修改：按钮背景颜色淡化 (使用浅灰蓝 #e0eaf1)
-        DIALOG_QSS = (
-            "QMessageBox { background-color: white; padding: 20px; }"
-            "QLabel { margin-top: 5px; margin-bottom: 5px; }"
-            "QMessageBox QPushButton {"
-            "background-color: #e0eaf1; "
-            "color: #33415c; "
-            "border: 1px solid #c8d3db; "
-            "border-radius: 4px; "
-            "padding: 5px 15px;"
-            "}"
-            "QMessageBox QPushButton:hover { background-color: #d1dde8; }"
-        )
-
         raw_text = self.input_text.toPlainText()
         if not raw_text.strip():
             self.status_label.setText("⚠️ 输入为空，请粘贴文献文本。")
@@ -620,20 +577,6 @@ class ReferenceFormatterApp(QMainWindow):
         """
         第三步：复制格式化结果到剪贴板。
         """
-        # 样式修改：按钮背景颜色淡化 (使用浅灰蓝 #e0eaf1)
-        DIALOG_QSS = (
-            "QMessageBox { background-color: white; padding: 20px; }"
-            "QLabel { margin-top: 5px; margin-bottom: 5px; }"
-            "QMessageBox QPushButton {"
-            "background-color: #e0eaf1; "
-            "color: #33415c; "
-            "border: 1px solid #c8d3db; "
-            "border-radius: 4px; "
-            "padding: 5px 15px;"
-            "}"
-            "QMessageBox QPushButton:hover { background-color: #d1dde8; }"
-        )
-
         if not self.html_output_for_clipboard:
             self.status_label.setText("⚠️ 请按顺序先进行 '检查' 和 '统一格式' 操作。")
             # 样式应用
@@ -690,19 +633,6 @@ class ReferenceFormatterApp(QMainWindow):
         """
         第四步：将格式化结果导出为Word文件，使用自定义字体设置。
         """
-        DIALOG_QSS = (
-            "QMessageBox { background-color: white; padding: 20px; }"
-            "QLabel { margin-top: 5px; margin-bottom: 5px; }"
-            "QMessageBox QPushButton {"
-            "background-color: #e0eaf1; "
-            "color: #33415c; "
-            "border: 1px solid #c8d3db; "
-            "border-radius: 4px; "
-            "padding: 5px 15px;"
-            "}"
-            "QMessageBox QPushButton:hover { background-color: #d1dde8; }"
-        )
-
         if not self.html_output_for_clipboard:
             self.status_label.setText("⚠️ 请先完成格式化操作。")
             msg = QMessageBox(self)
