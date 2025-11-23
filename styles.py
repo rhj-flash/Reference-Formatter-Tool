@@ -1,222 +1,152 @@
-# styles.py
+# 文件：styles.py
+from config import Color as c
 
+DIALOG_QSS = f"""
+    QMessageBox {{ background: {c.BG_CARD}; border: none; border-radius: 16px; }}
+    QMessageBox QLabel {{ color: {c.TEXT}; font-family: "Microsoft YaHei"; font-size: 10pt; }}
+    QMessageBox QPushButton {{
+        background: {c.PRIMARY}; color: white; border: none;
+        border-radius: 10px; padding: 10px 30px; font-weight: 600;
+    }}
+    QMessageBox QPushButton:hover {{ background: {c.PRIMARY_DARK}; }}
 """
-集中存放 UI 主题相关的颜色、QSS 与弹窗样式，便于 main.py 统一引用。
-"""
-
-import os
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ARROW_ICON_PATH = os.path.join(BASE_DIR, "assets", "down_arrow.svg").replace("\\", "/")
-
-# —— 主题配色（恢复为莫兰迪并加入羊皮卷底色） —— #
-COLOR_BACKGROUND = "#fdf3d7"
-COLOR_CARD_BG = "#fff9ec"
-COLOR_TEXT_DARK = "#554236"
-COLOR_TEXT_LIGHT = "#8c756a"
-COLOR_BORDER = "#e5d2a9"
-
-COLOR_PREVIEW_RGBA = "rgba(162, 185, 188, 0.6)"
-COLOR_PROCESS_RGBA = "rgba(197, 197, 138, 0.6)"
-COLOR_COPY_RGBA = "rgba(216, 167, 134, 0.6)"
-COLOR_EXPORT_RGBA = "rgba(134, 167, 216, 0.6)"
-
-COLOR_PREVIEW_HOVER = "rgba(162, 185, 188, 0.8)"
-COLOR_PROCESS_HOVER = "rgba(197, 197, 138, 0.8)"
-COLOR_COPY_HOVER = "rgba(216, 167, 134, 0.8)"
-COLOR_EXPORT_HOVER = "rgba(134, 167, 216, 0.8)"
-
-# —— 弹窗样式（恢复原始淡雅样式） —— #
-DIALOG_QSS = """
-    QMessageBox { background-color: white; padding: 20px; }
-    QLabel { margin-top: 5px; margin-bottom: 5px; }
-    QMessageBox QPushButton {
-        background-color: #e0eaf1;
-        color: #33415c;
-        border: 1px solid #c8d3db;
-        border-radius: 4px;
-        padding: 5px 15px;
-    }
-    QMessageBox QPushButton:hover { background-color: #d1dde8; }
-"""
-
 
 def build_main_window_qss() -> str:
-    """返回恢复后的莫兰迪风格全局 QSS。"""
-
     return f"""
-        QMainWindow {{
-            background-color: {COLOR_BACKGROUND};
-        }}
-        QWidget#centralWidget {{
-            background-color: {COLOR_BACKGROUND};
-        }}
-        QLabel {{
-            color: {COLOR_TEXT_DARK};
-            font-size: 10pt;
-        }}
+    QMainWindow {{
+        background: {c.BG_PAPER}; 
+        border: none;
+    }}
 
-        QLabel#TitleLabel {{
-            font-size: 18pt;
-            font-weight: bold;
-            color: {COLOR_TEXT_DARK};
-            padding: 12px 0 8px 0;
-        }}
+    /* 垂直滚动条 */
+    QScrollBar:vertical {{
+        background: {c.BG_PAPER};
+        width: 4px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: #C8C4BB;
+        min-height: 20px;
+        border-radius: 2px;
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0px;
+    }}
+    
+    /* 水平滚动条 */
+    QScrollBar:horizontal {{
+        background: {c.BG_PAPER};
+        height: 4px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: #C8C4BB;
+        min-width: 20px;
+        border-radius: 2px;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0px;
+    }}
 
-        QLabel#HeroSubtitle {{
-            color: {COLOR_TEXT_LIGHT};
-            font-size: 10pt;
-        }}
+    QLabel {{
+        color: {c.TEXT};
+        font-family: "Microsoft YaHei";
+        font-size: 10pt; font-weight: 500;
+    }}
+    
+    QLabel#TitleLabel {{
+        font-family: Georgia; font-size: 30pt; font-weight: bold; color: {c.PRIMARY};
+    }}
 
-        QLabel#HeroBadge {{
-            background-color: rgba(255, 255, 255, 0.6);
-            color: {COLOR_TEXT_DARK};
-            border-radius: 10px;
-            padding: 3px 10px;
-        }}
+    QFrame#HeroCard, QFrame#ControlPanel {{
+        background: {c.BG_CARD}; border: none; border-radius: 18px;
+    }}
 
-        QFrame#HeroCard {{
-            background-color: rgba(255, 255, 255, 0.65);
-            border-radius: 14px;
-            padding: 14px;
-        }}
+    QLabel#StatusLabel {{
+        background: {c.BG_STATUS}; color: {c.PRIMARY};
+        border-radius: 12px; padding: 14px 20px; font-weight: bold; font-size: 11pt;
+    }}
 
-        QFrame#FontSettings {{
-            background-color: rgba(255, 255, 255, 0.6);
-            border: 1px solid {COLOR_BORDER};
-            border-radius: 12px;
-            padding: 6px 10px;
-        }}
+    QTextEdit {{
+        background: #F8F5ED; border: none; border-radius: 14px;
+        padding: 18px; font-size: 10pt;
+        selection-background-color: {c.ACCENT};
+    }}
+    QTextEdit:focus {{ background: #FFF8E8; }}
+    QTextEdit#PreviewTextEdit {{ background: #F2ECDE; }}
+    QTextEdit#PreviewTextEdit:focus {{ background: #F8F5ED; }}
 
-        QLabel#StatusLabel {{
-            color: {COLOR_TEXT_DARK};
-            font-weight: 500;
-            font-size: 10pt;
-            padding: 4px 12px;
-            border: none;
-            border-radius: 20px;
-            background-color: rgba(255,255,255,0.85);
-            margin-top: 8px;
-            min-height: 34px;
-        }}
+    QPushButton {{
+        background: white; border: none; border-radius: 14px;
+        padding: 14px 28px; font-weight: 600; color: {c.TEXT}; font-size: 11pt;
+    }}
+    QPushButton:hover {{ background: {c.ACCENT}; color: white; }}
+    QPushButton:pressed {{ background: {c.PRIMARY_DARK}; }}
 
-        QLabel#FormatInfo {{
-            font-size: 9pt;
-            color: {COLOR_TEXT_LIGHT};
-            padding: 10px 0 0 0;
-        }}
+    /* ==================== 关键修改：下拉框矮 + ▼ 箭头一定显示 ==================== */
+    QComboBox {{
+        background: {c.BG_PAPER};  /* 使用主背景色 */
+        border: none;  
+        border-radius: 8px;
+        padding: 4px 30px 4px 12px;
+        font-family: "Microsoft YaHei";
+        font-size: 10.5pt;
+        font-weight: 600;
+        color: {c.TEXT};
+        min-height: 20px;
+        max-height: 28px;
+        text-align: center;  /* 使下拉框中的文本居中 */
+    }}
+    QComboBox:hover, QComboBox:focus {{
+        background: {c.BG_PAPER};
+    }}
 
-        QTextEdit {{
-            border: none;
-            border-radius: 10px;
-            padding: 12px;
-            background-color: {COLOR_CARD_BG};
-            font-size: 10pt;
-            line-height: 1.4;
-        }}
-        QTextEdit:focus {{
-            border: 1px solid rgba(162, 185, 188, 1.0);
-        }}
-        QTextEdit#output_text {{
-            background-color: {COLOR_CARD_BG};
-        }}
+    /* 箭头区域 */
+    QComboBox::drop-down {{
+        subcontrol-origin: padding;
+        subcontrol-position: center right;
+        width: 28px;                            
+        border: none;                           
+        padding-right: 6px;
+    }}
 
-        QFrame#ControlPanel {{
-            background-color: rgba(255, 255, 255, 0.7);
-            border: none;
-            border-radius: 12px;
-            padding: 20px;
-        }}
+    /* 关键：使用系统默认的箭头样式 */
+    QComboBox::down-arrow {{
+        width: 20px;
+        height: 20px;
+        margin-right: 2px;
+        image: url(dropdown-arrow.svg);
+    }}
 
-        QPushButton {{
-            color: {COLOR_TEXT_DARK};
-            border: none;
-            padding: 10px 14px;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 10pt;
-            min-height: 34px;
-            text-align: left;
-            margin-bottom: 10px;
-        }}
-        QPushButton:hover {{
-        }}
-        QPushButton:pressed {{
-            padding-top: 13px;
-        }}
+    QComboBox QAbstractItemView {{
+        background: white;
+        selection-background-color: {c.PRIMARY};
+        selection-color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 6px;
+        font-family: "Microsoft YaHei";
+        font-size: 11pt;
+        outline: none;
+    }}
+    QComboBox QAbstractItemView::item {{
+        text-align: center;
+        padding: 4px 8px;
+    }}
 
-        QPushButton#PreviewButton {{
-            background-color: {COLOR_PREVIEW_RGBA};
-        }}
-        QPushButton#PreviewButton:hover {{
-            background-color: {COLOR_PREVIEW_HOVER};
-        }}
+    /* 三个大按钮 */
+    QPushButton#CheckButton,
+    QPushButton#FormatButton,
+    QPushButton#ExportButton {{
+        font-family: "Microsoft YaHei";
+        font-size: 13pt;
+        font-weight: 700;
+        padding: 18px 32px;
+        min-height: 40px;
+    }}
 
-        QPushButton#ProcessButton {{
-            background-color: {COLOR_PROCESS_RGBA};
-        }}
-        QPushButton#ProcessButton:hover {{
-            background-color: {COLOR_PROCESS_HOVER};
-        }}
-
-        QPushButton#CopyButton {{
-            background-color: {COLOR_COPY_RGBA};
-        }}
-        QPushButton#CopyButton:hover {{
-            background-color: {COLOR_COPY_HOVER};
-        }}
-
-        QPushButton#ExportButton {{
-            background-color: {COLOR_EXPORT_RGBA};
-        }}
-        QPushButton#ExportButton:hover {{
-            background-color: {COLOR_EXPORT_HOVER};
-        }}
-
-        QPushButton:disabled {{
-            background-color: {COLOR_BORDER};
-            color: {COLOR_TEXT_LIGHT};
-            border: 1px solid {COLOR_BORDER};
-        }}
-
-        QComboBox {{
-            background-color: rgba(255, 255, 255, 0.92);
-            border: none;
-            border-radius: 10px;
-            padding: 4px 36px 4px 12px;
-            font-size: 10pt;
-            min-height: 30px;
-            margin-bottom: 10px;
-            color: {COLOR_TEXT_DARK};
-        }}
-        QComboBox:hover {{
-            border: none;
-        }}
-        QComboBox:focus {{
-            border: none;
-        }}
-        QComboBox::drop-down {{
-            border: none;
-            width: 32px;
-            background: qlineargradient(
-                x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgba(255, 255, 255, 0.9),
-                stop:1 rgba(255, 248, 225, 0.9)
-            );
-            border-top-right-radius: 10px;
-            border-bottom-right-radius: 10px;
-        }}
-        QComboBox::down-arrow {{
-            image: url("{ARROW_ICON_PATH}");
-            width: 16px;
-            height: 16px;
-            margin-right: 8px;
-        }}
-        QComboBox QAbstractItemView {{
-            border: none;
-            background: #fffaf0;
-            selection-background-color: rgba(162, 185, 188, 0.25);
-            selection-color: {COLOR_TEXT_DARK};
-            outline: none;
-        }}
+    QPushButton#GithubButton:hover {{
+        background: rgba(53, 82, 74, 0.12);
+        border-radius: 16px;
+    }}
     """

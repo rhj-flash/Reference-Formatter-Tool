@@ -6,6 +6,7 @@ import os
 from io import StringIO
 
 from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 # Pygments components for stable HTML formatting and segmentation
 from pygments.formatters import HtmlFormatter
@@ -15,7 +16,7 @@ from pygments.token import Text
 # 添加 Word 文档处理相关的导入
 try:
     from docx import Document
-    from docx.shared import Pt, Inches
+    from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from htmldocx import HtmlToDocx
 
@@ -63,9 +64,12 @@ class ReferenceBlockLexer(RegexLexer):
 
 # --- Pygments 自定义 Formatter (保持原样) ---
 
+# In reference_processor.py
+
 class ReferenceBlockFormatter(HtmlFormatter):
     """
     自定义 Pygments HTML Formatter，用于显示格式化后的文献分割预览。
+    支持编号格式和分割线显示。
     """
     # 启用全行着色
     full_lines = True
@@ -92,6 +96,67 @@ class ReferenceBlockFormatter(HtmlFormatter):
         ]
         # 从 options 中取出预先计算的行标记数据
         self.lines_with_markers = options.pop('lines_with_markers', [])
+        # 添加新选项
+        self.show_numbering = options.pop('show_numbering', True)
+        self.show_dividers = options.pop('show_dividers', True)
+        self.numbering_format = options.pop('numbering_format', '[1]')
+
+    def _render_block(self, block_lines, block_num, total_blocks):
+        """渲染一个完整的格式化文献块"""
+        if not block_lines:
+            return ""
+
+        # 选择样式（循环使用）
+        style = self.BLOCK_STYLES[block_num % len(self.BLOCK_STYLES)]
+        
+        # 生成编号
+        number_html = ""
+        if self.show_numbering:
+            number_text = self.numbering_format.replace('1', str(block_num + 1))
+            number_html = f'<span style="font-weight: bold; margin-right: 8px; color: #555;">{number_text}</span>'
+        
+        # 生成分割线
+        divider = ""
+        if self.show_dividers and block_num < total_blocks - 1:
+            divider = '<div style="height: 1px; background: linear-gradient(90deg, transparent, #ccc, transparent); margin: 15px 0 5px 0;"></div>'
+        
+        # 文献标题 - 显示格式化后的状态
+        block_header = (
+            f'<div style="background: {style["header_bg"]}; padding: 10px 15px; '
+            f'font-weight: bold; border-radius: 8px 8px 0 0; '
+            f'border: 2px solid {style["border_color"]}; border-bottom: 1px dashed {style["border_color"]}; '
+            f'color: #333; font-size: 12pt; display: flex; align-items: center;">'
+            f'{number_html}📖 文献 {block_num + 1}'
+            f'</div>'
+        )
+
+        # 文献内容
+        block_content = []
+        for line in block_lines:
+            if line.strip():  # 只处理非空行
+                line_html = (
+                    f'<div style="padding: 8px 15px; '
+                    f'border-left: 2px solid {style["border_color"]}; '
+                    f'border-right: 2px solid {style["border_color"]}; '
+                    f'font-family: \'Courier New\', monospace; '
+                    f'white-space: pre-wrap;">'
+                    f'{line}'
+                    f'</div>'
+                )
+                block_content.append(line_html)
+
+        # 包装整个文献块
+        return (
+            f'<div style="margin: 20px 0; border-radius: 8px;">'
+            f'{block_header}'
+            f'<div style="background-color: {style["bg_color"]}; '
+            f'border: 2px solid {style["border_color"]}; border-top: none; '
+            f'border-radius: 0 0 8px 8px;">'
+            f'{"".join(block_content)}'
+            f'</div>'
+            f'{divider}'
+            f'</div>'
+        )
 
     def format_unencoded(self, tokensource, outfile):
         """
@@ -112,58 +177,13 @@ class ReferenceBlockFormatter(HtmlFormatter):
 
         current_block_lines = []
         block_index = 0
-
-        def render_block(block_lines, block_num):
-            """渲染一个完整的格式化文献块"""
-            if not block_lines:
-                return ""
-
-            # 选择样式（循环使用）
-            style = self.BLOCK_STYLES[block_num % len(self.BLOCK_STYLES)]
-
-            # 文献标题 - 显示格式化后的状态
-            block_header = (
-                f'<div style="background: {style["header_bg"]}; padding: 10px 15px; '
-                f'font-weight: bold; border-radius: 8px 8px 0 0; '
-                f'border: 2px solid {style["border_color"]}; border-bottom: 1px dashed {style["border_color"]}; '
-                f'color: #333; font-size: 12pt;">'
-                f'📖 文献 {block_num + 1} </div>'
-            )
-
-            # 文献内容
-            block_content = []
-            for line in block_lines:
-                if line.strip():  # 只处理非空行
-                    # 注意：这里不需要再转义，因为内容已经是格式化后的
-                    line_html = (
-                        f'<div style="padding: 8px 15px; '
-                        f'border-left: 2px solid {style["border_color"]}; '
-                        f'border-right: 2px solid {style["border_color"]}; '
-                        f'font-family: \'Courier New\', monospace; '
-                        f'white-space: pre-wrap;">'
-                        f'{line}'
-                        f'</div>'
-                    )
-                    block_content.append(line_html)
-
-            # 包装整个文献块（移除 box-shadow，避免不兼容属性）
-            return (
-                f'<div style="margin: 25px 0; border-radius: 8px;">'
-                f'{block_header}'
-                f'<div style="background-color: {style["bg_color"]}; '
-                f'border: 2px solid {style["border_color"]}; border-top: none; '
-                f'border-radius: 0 0 8px 8px;">'
-                f'{"".join(block_content)}'
-                f'</div>'
-                f'</div>'
-            )
+        total_blocks = sum(1 for _ in self.lines_with_markers if _[1])  # 计算总块数
 
         # 处理所有行
         for i, (line, is_new_block_start) in enumerate(self.lines_with_markers):
-
             if is_new_block_start and current_block_lines:
                 # 渲染当前块
-                real_outfile.write(render_block(current_block_lines, block_index))
+                real_outfile.write(self._render_block(current_block_lines, block_index, total_blocks))
                 # 开始新块
                 current_block_lines = [line]
                 block_index += 1
@@ -172,7 +192,7 @@ class ReferenceBlockFormatter(HtmlFormatter):
 
         # 渲染最后一个块
         if current_block_lines:
-            real_outfile.write(render_block(current_block_lines, block_index))
+            real_outfile.write(self._render_block(current_block_lines, block_index, total_blocks))
 
         # 显示统计信息
         if block_index >= 0:
@@ -211,18 +231,12 @@ class ReferenceProcessor:
         self.cjk_pattern = re.compile(r'[\u4e00-\u9fff]')
         print("DEBUG: ReferenceProcessor initialized.")
 
-    def process_text(self, raw_text: str, format_name: str) -> tuple[str, str, bool]:
+    def process_text(self, raw_text: str, format_name: str, numbering_format: str = "1.") -> tuple[str, str, bool]:
         """
         处理用户输入的完整原始文本。
-
-        Args:
-            raw_text (str): 原始输入的文献文本。
-            format_name (str): 格式名称（保留参数，用于兼容性）
-
-        Returns:
-            tuple[str, str, bool]: (Word HTML输出, UI纯文本输出, 是否成功剥离了现有编号)
+        新增 numbering_format 参数支持 [1] 格式
         """
-        print(f"DEBUG: Starting to process raw text...")
+        print(f"DEBUG: Starting to process raw text with format: {numbering_format}")
 
         if not raw_text.strip():
             print("DEBUG: Raw text is empty.")
@@ -230,9 +244,8 @@ class ReferenceProcessor:
 
         lines = raw_text.strip().split('\n')
 
-        styled_html_references = []  # 1. 带 <span> 样式的 HTML (用于 Word)
-        plain_text_references = []  # 2. 纯文本 (用于 UI 预览)
-
+        styled_html_references = []
+        plain_text_references = []
         was_stripped = False
 
         for line in lines:
@@ -249,21 +262,233 @@ class ReferenceProcessor:
             normalized_line = self._normalize_characters(cleaned_line)
 
             # 3. 生成两种输出
-            # (用于 UI 预览): 存储转义后的纯文本
             plain_text_references.append(html.escape(normalized_line))
-
-            # (用于 Word): 存储带 <span> 样式的 HTML
             styled_html_content = self._apply_mixed_font_styles(normalized_line)
             styled_html_references.append(styled_html_content)
 
         print(f"DEBUG: Stripped existing numbering: {was_stripped}")
 
-        # 生成两种格式的文本
+        # 生成两种格式的文本 (传入 numbering_format)
         html_output = self._generate_html_list(styled_html_references)
-        plain_text_output = self._generate_plain_text_list(plain_text_references)
+        # 更新：传入编号格式用于界面预览
+        plain_text_output = self._generate_plain_text_list(plain_text_references, numbering_format)
 
-        print("DEBUG: Processing finished. HTML and Plain Text generated.")
         return html_output, plain_text_output, was_stripped
+
+    def _generate_plain_text_list(self, references: list, numbering_format: str = "1.") -> str:
+        """
+        生成用于在程序界面中预览的纯文本列表，支持自定义编号格式。
+        """
+        plain_list = []
+        for i, ref in enumerate(references, 1):
+            # 动态生成前缀：将格式中的 '1' 替换为当前序号
+            # 例如: "[1]" -> "[2]", "(1)" -> "(2)"
+            if "1" in numbering_format:
+                prefix = numbering_format.replace("1", str(i))
+            else:
+                # 以此为兜底
+                prefix = f"{i}."
+
+            plain_list.append(f"{prefix} {html.unescape(ref)}")
+
+        return "\n".join(plain_list)
+
+    def _create_custom_numbering_xml(self, doc, format_string="[%1]"):
+        """
+        使用底层 XML 在 Word 文档中注入自定义的自动编号样式（如 [1]）。
+        返回生成的 numId。
+        """
+        # 1. 确保文档已经初始化了 numbering 部分
+        # 技巧：临时创建一个列表段落然后删除，强制 python-docx 初始化 numbering_part
+        try:
+            doc.part.numbering_part
+        except Exception:
+            p = doc.add_paragraph(style='List Number')
+            doc._body._element.remove(p._element)
+
+        numbering_part = doc.part.numbering_part
+
+        # 获取底层的 numbering 元素
+        # 注意：这里使用非公开 API (_numbering)，这是操作底层 XML 的唯一方式
+        numbering_element = numbering_part.numbering_definitions._numbering
+
+        # 2. 计算下一个可用的 ID
+        # 获取当前所有 abstractNumId 的最大值
+        abstract_num_ids = [int(e.get(qn('w:abstractNumId'))) for e in numbering_element.xpath('w:abstractNum')]
+        next_abstract_id = max(abstract_num_ids) + 1 if abstract_num_ids else 1
+
+        # 获取当前所有 numId 的最大值
+        num_ids = [int(e.get(qn('w:numId'))) for e in numbering_element.xpath('w:num')]
+        next_num_id = max(num_ids) + 1 if num_ids else 1
+
+        # 3. 创建 abstractNum (定义样式外观)
+        abstract_num = OxmlElement('w:abstractNum')
+        abstract_num.set(qn('w:abstractNumId'), str(next_abstract_id))
+
+        # 定义 Level 0 的样式
+        lvl = OxmlElement('w:lvl')
+        lvl.set(qn('w:ilvl'), '0')
+
+        # 起始编号 1
+        start = OxmlElement('w:start')
+        start.set(qn('w:val'), '1')
+        lvl.append(start)
+
+        # 编号格式 decimal (1, 2, 3...)
+        num_fmt = OxmlElement('w:numFmt')
+        num_fmt.set(qn('w:val'), 'decimal')
+        lvl.append(num_fmt)
+
+        # 关键：定义显示文本，例如 [%1]
+        lvl_text = OxmlElement('w:lvlText')
+        lvl_text.set(qn('w:val'), format_string)
+        lvl.append(lvl_text)
+
+        # 对齐方式
+        jc = OxmlElement('w:jc')
+        jc.set(qn('w:val'), 'left')
+        lvl.append(jc)
+
+        # 缩进设置 (悬挂缩进)
+        p_pr = OxmlElement('w:pPr')
+        ind = OxmlElement('w:ind')
+        ind.set(qn('w:left'), '420')  # 左缩进 (约0.74cm)
+        ind.set(qn('w:hanging'), '420')  # 悬挂缩进 (对齐编号)
+        p_pr.append(ind)
+        lvl.append(p_pr)
+
+        abstract_num.append(lvl)
+        numbering_element.append(abstract_num)
+
+        # 4. 创建 num (将样式实例化)
+        num = OxmlElement('w:num')
+        num.set(qn('w:numId'), str(next_num_id))
+
+        abstract_num_ref = OxmlElement('w:abstractNumId')
+        abstract_num_ref.set(qn('w:val'), str(next_abstract_id))
+        num.append(abstract_num_ref)
+
+        numbering_element.append(num)
+
+        return next_num_id
+
+    def export_to_word_file_with_custom_font(self, html_content: str, file_path: str,
+                                             format_config: dict, numbering_format: str,
+                                             english_font: str, english_size: float,
+                                             chinese_font: str, chinese_size: float) -> bool:
+        """
+        使用自定义字体设置导出Word文件。
+        支持多种自动编号格式，并修复了 XML 类型错误。
+        """
+        try:
+            if not DOCX_AVAILABLE:
+                raise ImportError("python-docx 或 htmldocx 库未安装")
+
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'a') as f:
+                        pass
+                except IOError as e:
+                    raise PermissionError(f"文件可能被占用: {e}")
+
+            doc = Document()
+            self._setup_custom_font_styles(doc, format_config, english_font, english_size, chinese_font, chinese_size)
+
+            # 1. 标题设置 (强制黑色)
+            title = doc.add_heading('参考文献', 0)
+            try:
+                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                title_run = title.runs[0]
+                title_run.font.size = Pt(format_config.get("title_font_size", 16))
+                title_run.font.name = english_font
+                title_run._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
+                title_run.font.color.rgb = RGBColor(0, 0, 0)
+            except Exception as e:
+                print(f"WARNING: Error formatting title: {e}")
+
+            doc.add_paragraph().paragraph_format.space_after = Pt(format_config.get("title_margin_bottom", 20))
+
+            references = self._extract_references_from_html(html_content)
+
+            # 2. 准备自动编号样式
+            # 定义界面选项到 Word XML 格式的映射 (%1 代表数字占位符)
+            format_mapping = {
+                "[1]": "[%1]",
+                "(1)": "(%1)",
+                "1)": "%1)",
+                "<1>": "<%1>",
+                "{1}": "{%1}"
+            }
+
+            custom_num_id = None
+
+            # 只有当格式不是默认的 "1." 时，才进行 XML 注入
+            if numbering_format != "1." and numbering_format in format_mapping:
+                try:
+                    xml_format_string = format_mapping[numbering_format]
+                    custom_num_id = self._create_custom_numbering_xml(doc, xml_format_string)
+                    print(f"DEBUG: Created custom numbering '{numbering_format}' with ID: {custom_num_id}")
+                except Exception as e:
+                    print(f"ERROR: Failed to create custom numbering XML: {e}")
+
+            # 3. 循环写入文献
+            for i, reference in enumerate(references, 1):
+                if not reference or not reference.strip():
+                    continue
+
+                # 创建段落
+                paragraph = doc.add_paragraph()
+
+                # --- 应用编号 ---
+                # 如果是自定义格式且注入成功
+                if custom_num_id is not None:
+                    # 使用自定义 XML 样式
+                    p_pr = paragraph._p.get_or_add_pPr()
+                    num_pr = p_pr.get_or_add_numPr()
+
+                    # 设置 numId
+                    num_id_elem = num_pr.get_or_add_numId()
+                    # 🟢 【修复】必须传 int 类型，不能传 str
+                    num_id_elem.val = int(custom_num_id)
+
+                    # 设置 ilvl
+                    ilvl_elem = num_pr.get_or_add_ilvl()
+                    # 🟢 【修复】必须传 int 类型
+                    ilvl_elem.val = 0
+
+                else:
+                    # 默认 "1." 样式 (或者注入失败回退)
+                    paragraph.style = 'List Number'
+
+                # 填充文献内容
+                self._improved_mixed_font_text_custom(paragraph, reference,
+                                                      english_font, english_size,
+                                                      chinese_font, chinese_size)
+
+                # 通用段落设置
+                paragraph_format = paragraph.paragraph_format
+                paragraph_format.line_spacing = format_config.get("line_spacing", 1.5)
+                paragraph_format.space_after = Pt(format_config.get("item_spacing", 6))
+
+            # 保存文件
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    doc.save(file_path)
+                    return True
+                except PermissionError as e:
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)
+                    else:
+                        raise e
+            return True
+
+        except Exception as e:
+            print(f"ERROR: Failed to export Word file: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _strip_numbering(self, line: str) -> tuple[str, bool, int]:
         """
@@ -332,48 +557,71 @@ class ReferenceProcessor:
     def _apply_mixed_font_styles(self, line: str) -> str:
         """
         遍历一行文本，使用 <span> 标签为中英文/数字片段分别应用不同字体。
+        保留加粗和斜体格式，特别处理冒号后的文本。
         """
+        # 首先处理加粗和斜体标记
+        # 将 **text** 转换为 <b>text</b>
+        line = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
+        # 将 *text* 转换为 <i>text</i>
+        line = re.sub(r'\*(.*?)\*', r'<i>\1</i>', line)
+        
+        # 处理冒号后的文本，添加斜体
         parts = []
-        # 正则表达式分割：中文 | 英文/数字/空格 | 标点符号
-        pattern = re.compile(r'([\u4e00-\u9fff]+)|([a-zA-Z0-9\s]+)|([^\u4e00-\u9fff\s]+)')
-
+        segments = line.split(':')
+        
+        for i, segment in enumerate(segments):
+            if i > 0:  # 在第一个冒号后的内容前后添加斜体标签
+                parts.append(':<i>')
+                parts.append(segment)
+                parts.append('</i>')
+            else:
+                parts.append(segment)
+        
+        line = ''.join(parts)
+        
+        # 处理中英文混合
+        result = []
+        # 使用更精确的正则表达式匹配HTML标签
+        pattern = re.compile(r'(<[^>]+>)|([\u4e00-\u9fff]+)|([a-zA-Z0-9\s]+)|([^<\u4e00-\u9fff\s]+)')
+        
         for match in pattern.finditer(line):
-            chinese_part = match.group(1)
-            english_part = match.group(2)
-            punctuation_part = match.group(3)
-
-            if chinese_part:
-                escaped_content = html.escape(chinese_part)
-                parts.append(
-                    f'<span style="font-family: \'{self.CHINESE_FONT}\'; '
-                    f'mso-hansi-font-family: \'{self.CHINESE_FONT}\'; '
-                    f'mso-bidi-font-family: \'{self.CHINESE_FONT}\'; '
-                    f'mso-ascii-font-family: \'{self.CHINESE_FONT}\';">'
-                    f'{escaped_content}</span>'
+            html_tag = match.group(1)
+            chinese_part = match.group(2)
+            english_part = match.group(3)
+            other_part = match.group(4)
+            
+            if html_tag:
+                # 直接添加HTML标签
+                result.append(html_tag)
+            elif chinese_part:
+                result.append(
+                    f'<span style="font-family: {self.CHINESE_FONT}; '
+                    f'mso-hansi-font-family: {self.CHINESE_FONT}; '
+                    f'mso-bidi-font-family: {self.CHINESE_FONT}; '
+                    f'mso-ascii-font-family: {self.CHINESE_FONT};">'
+                    f'{chinese_part}</span>'
                 )
             elif english_part:
-                escaped_content = html.escape(english_part)
-                parts.append(
-                    f'<span style="font-family: \'{self.ENGLISH_FONT}\'; '
-                    f'mso-hansi-font-family: \'{self.ENGLISH_FONT}\'; '
-                    f'mso-bidi-font-family: \'{self.ENGLISH_FONT}\'; '
-                    f'mso-ascii-font-family: \'{self.ENGLISH_FONT}\';">'
-                    f'{escaped_content}</span>'
+                result.append(
+                    f'<span style="font-family: {self.ENGLISH_FONT}; '
+                    f'mso-hansi-font-family: {self.ENGLISH_FONT}; '
+                    f'mso-bidi-font-family: {self.ENGLISH_FONT}; '
+                    f'mso-ascii-font-family: {self.ENGLISH_FONT};">'
+                    f'{english_part}</span>'
                 )
-            elif punctuation_part:
-                escaped_content = html.escape(punctuation_part)
-                # 简单判断是否为中文标点 (使用常见全角符号作为判断依据)
-                is_chinese_punct = any(c in '，。：；！？' for c in punctuation_part)
+            elif other_part:
+                # 处理标点符号
+                is_chinese_punct = any(c in '，。：；！？' for c in other_part)
                 font = self.CHINESE_FONT if is_chinese_punct else self.ENGLISH_FONT
-                parts.append(
-                    f'<span style="font-family: \'{font}\'; '
-                    f'mso-hansi-font-family: \'{font}\'; '
-                    f'mso-bidi-font-family: \'{font}\'; '
-                    f'mso-ascii-font-family: \'{font}\';">'
-                    f'{escaped_content}</span>'
+                result.append(
+                    f'<span style="font-family: {font}; '
+                    f'mso-hansi-font-family: {font}; '
+                    f'mso-bidi-font-family: {font}; '
+                    f'mso-ascii-font-family: {font};">'
+                    f'{other_part}</span>'
                 )
-
-        return "".join(parts)
+        
+        return ''.join(result)
 
     def _generate_html_list(self, styled_html_references: list[str]) -> str:
         """
@@ -454,15 +702,7 @@ class ReferenceProcessor:
         """
         return html_string
 
-    def _generate_plain_text_list(self, references: list) -> str:
-        """
-        生成用于在程序界面中预览的纯文本列表，使用自动排序的序号。
-        """
-        plain_list = [
-            f"{i}. {html.unescape(ref)}"
-            for i, ref in enumerate(references, 1)
-        ]
-        return "\n".join(plain_list)
+
 
     def get_formatted_split_preview(self, raw_text: str, format_name: str) -> str:
         """
@@ -588,113 +828,7 @@ class ReferenceProcessor:
 
         return result
 
-    def export_to_word_file_with_custom_font(self, html_content: str, file_path: str,
-                                             format_config: dict, numbering_format: str,
-                                             english_font: str, english_size: float,
-                                             chinese_font: str, chinese_size: float) -> bool:
-        """
-        使用自定义字体设置导出Word文件，使用Word原生自动编号。
-        """
-        try:
-            if not DOCX_AVAILABLE:
-                raise ImportError("python-docx 或 htmldocx 库未安装，无法生成Word文件")
 
-            print(f"DEBUG: Starting Word export with HTML content length: {len(html_content)}")
-
-            # 检查文件是否被其他程序占用
-            if os.path.exists(file_path):
-                try:
-                    # 尝试打开文件检查是否被占用
-                    with open(file_path, 'a') as f:
-                        pass
-                except IOError as e:
-                    raise PermissionError(f"文件 {file_path} 可能被其他程序占用，请关闭后重试: {e}")
-
-            # 创建新的Word文档
-            doc = Document()
-
-            # 设置自定义字体
-            self._setup_custom_font_styles(doc, format_config, english_font, english_size, chinese_font, chinese_size)
-
-            # 添加标题
-            title = doc.add_heading('参考文献', 0)
-
-            # 设置标题对齐方式
-            try:
-                alignment_map = {
-                    "center": WD_ALIGN_PARAGRAPH.CENTER,
-                    "left": WD_ALIGN_PARAGRAPH.LEFT,
-                    "right": WD_ALIGN_PARAGRAPH.RIGHT,
-                    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY
-                }
-                alignment = alignment_map.get(format_config.get("title_alignment", "center"), WD_ALIGN_PARAGRAPH.CENTER)
-                title.alignment = alignment
-            except Exception as e:
-                print(f"WARNING: Error setting title alignment: {e}")
-                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # 设置标题格式
-            title_run = title.runs[0]
-            title_run.font.size = Pt(format_config.get("title_font_size", 16))
-            title_run.font.name = english_font
-            title_run._element.rPr.rFonts.set(qn('w:eastAsia'), chinese_font)
-
-            # 添加一个空行
-            empty_para = doc.add_paragraph()
-            empty_para.paragraph_format.space_after = Pt(format_config.get("title_margin_bottom", 20))
-
-            # 从HTML内容中提取文献条目
-            references = self._extract_references_from_html(html_content)
-
-            print(f"DEBUG: Exporting {len(references)} references to Word")
-
-            # 添加参考文献 - 使用Word自动编号
-            for i, reference in enumerate(references, 1):
-                if reference and reference.strip():
-                    # 创建段落并添加到自动编号列表
-                    paragraph = doc.add_paragraph(style='List Number')
-
-                    # 添加文献内容（使用自定义字体）
-                    self._improved_mixed_font_text_custom(paragraph, reference,
-                                                          english_font, english_size,
-                                                          chinese_font, chinese_size)
-
-                    # 设置段落格式
-                    paragraph_format = paragraph.paragraph_format
-                    paragraph_format.line_spacing = format_config.get("line_spacing", 1.5)
-                    paragraph_format.space_after = Pt(format_config.get("item_spacing", 6))
-
-                    # 设置悬挂缩进
-                    paragraph_format.first_line_indent = Pt(-format_config.get("hanging_indent", 2) * 12)
-                    paragraph_format.left_indent = Pt(format_config.get("hanging_indent", 2) * 12)
-                else:
-                    print(f"DEBUG: Skipping empty reference at index {i}")
-
-            # 保存文档 - 添加重试机制
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    doc.save(file_path)
-                    print(f"DEBUG: Word file saved successfully to {file_path}")
-                    return True
-                except PermissionError as e:
-                    if attempt < max_retries - 1:
-                        print(f"WARNING: Permission denied on attempt {attempt + 1}, retrying...")
-                        import time
-                        time.sleep(1)  # 等待1秒后重试
-                    else:
-                        raise e
-
-        except PermissionError as e:
-            print(f"ERROR: Permission denied when saving Word file: {str(e)}")
-            # 提供更友好的错误信息
-            error_msg = f"无法保存文件到 {file_path}。可能的原因：\n1. 文件正在被其他程序（如Word）打开\n2. 没有写入权限\n3. 文件路径不存在\n请关闭文件或检查权限后重试。"
-            raise PermissionError(error_msg)
-        except Exception as e:
-            print(f"ERROR: Failed to export Word file with custom font: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
 
     def _setup_custom_font_styles(self, doc, format_config, english_font, english_size, chinese_font, chinese_size):
         """设置自定义字体样式"""
