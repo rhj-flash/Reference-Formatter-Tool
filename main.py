@@ -38,6 +38,36 @@ from reference_processor import ReferenceProcessor, DOCX_AVAILABLE
 from styles import build_main_window_qss, DIALOG_QSS
 
 
+# pyinstaller --onefile --windowed --name "文献引用格式化工具" --icon "app_icon.ico" --add-data "app_icon.ico;." main.py
+
+
+
+# **[START]** 新增函数：处理打包后的资源路径
+def resource_path(relative_path):
+    """
+    获取资源文件的绝对路径，适配 PyInstaller 打包后的环境。
+    如果程序是作为独立应用运行 (打包后)，它会查找临时目录下的资源。
+    如果程序是直接从脚本运行 (未打包)，它会查找相对路径。
+    """
+    try:
+        # 检查是否被 PyInstaller 打包
+        if getattr(sys, 'frozen', False):
+            # 打包后的运行路径
+            base_path = sys._MEIPASS
+        else:
+            # 脚本运行时的路径 (当前脚本所在目录)
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            
+        path = os.path.join(base_path, relative_path)
+        if not os.path.exists(path):
+            print(f"WARNING: Resource file not found: {path}")
+        return path
+    except Exception as e:
+        print(f"ERROR in resource_path: {str(e)}")
+        return relative_path  # 返回原始路径作为后备
+
+
+# **[END]** 新增函数
 class SmoothButton(QPushButton):
     """
     自定义丝滑按钮：
@@ -262,10 +292,64 @@ class ReferenceFormatterApp(QMainWindow):
         # 注意：这里需要获取当前位置稍微往下一点作为起点，需要 careful
         # 简单起见，我们只做 Opacity 渐变，既高级又稳健
 
+    # In the ReferenceFormatterApp class, find the _open_github_link method (around line 288) and replace it with:
     def _open_github_link(self):
-        """打开 GitHub 仓库链接。"""
-        QDesktopServices.openUrl(QUrl(self.GITHUB_URL))
-        print(f"DEBUG: Opening GitHub link: {self.GITHUB_URL}")
+        """Open GitHub repository in default browser."""
+        try:
+            url = QUrl(self.GITHUB_URL)
+            if not QDesktopServices.openUrl(url):
+                print(f"ERROR: Failed to open URL: {self.GITHUB_URL}")
+                self.status_label.setText("❌ 无法打开GitHub链接")
+        except Exception as e:
+            print(f"ERROR: Exception while opening GitHub link: {str(e)}")
+            self.status_label.setText("❌ 打开GitHub链接时出错")
+
+    # Then find where the GitHub button is created (around line 400-445) and replace that section with:
+            # 添加GitHub按钮
+            self.github_button = QPushButton()
+            self.github_button.setObjectName("GithubButton")
+            self.github_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.github_button.setFixedSize(36, 36)
+            self.github_button.setToolTip("访问 GitHub 仓库")
+
+            # 加载并设置GitHub图标
+            github_icon_path = resource_path("github_icon.ico")
+            icon = QIcon(github_icon_path)
+            if not icon.isNull():
+                self.github_button.setIcon(icon)
+                self.github_button.setIconSize(QSize(24, 24))
+                print(f"DEBUG: GitHub图标已加载: {github_icon_path}")
+            else:
+                print(f"WARNING: 无法加载GitHub图标: {github_icon_path}")
+
+            # 设置样式表
+            self.github_button.setStyleSheet("""
+                QPushButton#GithubButton {
+                    background-color: #F8F5ED;
+                    border: none;
+                    border-radius: 18px;
+                    padding: 0;
+                    margin: 0;
+                    width: 36px;
+                    height: 36px;
+                }
+                QPushButton#GithubButton:hover {
+                    background-color: #F2EDE0;
+                }
+                QPushButton#GithubButton:pressed {
+                    background-color: #E5E0D0;
+                }
+                QPushButton#GithubButton::icon {
+                    padding: 0;
+                    margin: 0;
+                }
+            """)
+
+            # 添加阴影效果
+            self._add_shadow(self.github_button, blur_radius=30, y_offset=8, alpha=100)
+            
+            # 连接点击事件
+            self.github_button.clicked.connect(self._open_github_link)
 
     def _apply_global_style(self):
         """
@@ -316,10 +400,18 @@ class ReferenceFormatterApp(QMainWindow):
         设置主窗口的布局和组件，添加字体设置面板。
         """
         self.setWindowTitle('文献引用格式化工具@rhj_flash')
-        
+
         # 设置窗口图标
-        if os.path.exists('app_icon.ico'):
-            self.setWindowIcon(QIcon('app_icon.ico'))
+        # **[START]** 修改主窗口图标加载逻辑
+        icon_path = resource_path('app_icon.ico')
+
+        # 设置窗口图标
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            print(f"DEBUG: 主窗口图标已加载: {icon_path}")
+        else:
+            print(f"ERROR: 主窗口图标文件未找到: {icon_path}")
+        # **[END]** 修改主窗口图标加载逻辑
 
         # 设置更舒适的窗口尺寸比例
         window_width = 1250
@@ -334,21 +426,21 @@ class ReferenceFormatterApp(QMainWindow):
             screen_geometry = screen.geometry()
             # 获取可用屏幕区域（排除任务栏）
             available_geometry = screen.availableGeometry()
-            
+
             # 计算窗口居中位置
             x = available_geometry.x() + (available_geometry.width() - window_width) // 2
             y = available_geometry.y() + (available_geometry.height() - window_height) // 2
-            
+
             # 确保窗口不会移出屏幕
             x = max(0, min(x, screen_geometry.width() - window_width))
             y = max(0, min(y, screen_geometry.height() - window_height))
-            
+
             # 调试输出
             print(f"DEBUG: Screen geometry = {screen_geometry.width()}x{screen_geometry.height()} @ ({screen_geometry.x()}, {screen_geometry.y()})")
             print(f"DEBUG: Available geometry = {available_geometry.width()}x{available_geometry.height()} @ ({available_geometry.x()}, {available_geometry.y()})")
             print(f"DEBUG: Window size = {window_width}x{window_height}")
             print(f"DEBUG: Moving window to x={x}, y={y}")
-            
+
             self.move(x, y)
 
         central_widget = QWidget()
@@ -366,7 +458,7 @@ class ReferenceFormatterApp(QMainWindow):
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(10, 10, 10, 10)
         top_bar_layout.setSpacing(15)
-        
+
         # 添加GitHub按钮
         self.github_button = QPushButton()
         self.github_button.setObjectName("GithubButton")
@@ -374,10 +466,13 @@ class ReferenceFormatterApp(QMainWindow):
         self.github_button.setFixedSize(36, 36)
         self.github_button.setToolTip("访问 GitHub 仓库")
 
-        # 设置图标
-        icon = QIcon("github_icon.ico")
-        self.github_button.setIcon(icon)
-        self.github_button.setIconSize(QSize(24, 24))
+        # 加载并设置GitHub图标
+        github_icon_path = resource_path("github_icon.ico")
+        icon = QIcon(github_icon_path)
+        if not icon.isNull():
+            self.github_button.setIcon(icon)
+            self.github_button.setIconSize(QSize(24, 24))
+            print(f"DEBUG: GitHub图标已加载: {github_icon_path}")
 
         # 设置样式表
         self.github_button.setStyleSheet("""
@@ -401,10 +496,13 @@ class ReferenceFormatterApp(QMainWindow):
                 margin: 0;
             }
         """)
-        
+
         # 添加阴影效果
         self._add_shadow(self.github_button, blur_radius=30, y_offset=8, alpha=100)
-        
+
+        # 连接点击事件
+        self.github_button.clicked.connect(self._open_github_link)
+
         # 创建标题标签
         title_label = QLabel("文献列表格式化工具")
         title_label.setObjectName("TitleLabel")
@@ -418,22 +516,22 @@ class ReferenceFormatterApp(QMainWindow):
                 qproperty-alignment: AlignCenter;
             }
         """)
-        
+
         # 添加GitHub按钮到左侧
         top_bar_layout.addWidget(self.github_button)
-        
+
         # 添加弹簧使标题居中
         top_bar_layout.addStretch(1)
-        
+
         # 添加标题
         top_bar_layout.addWidget(title_label)
-        
+
         # 添加另一个水平弹簧使标题保持居中
         top_bar_layout.addStretch(1)
-        
+
         # 添加顶部栏到主布局
         main_layout.insertWidget(0, top_bar)
-        
+
         hero_card = self._create_hero_card()
         # 移除标题标签，只保留副标题
         hero_card.layout().itemAt(0).itemAt(0).widget().setVisible(False)
@@ -448,7 +546,7 @@ class ReferenceFormatterApp(QMainWindow):
         english_font_layout.setContentsMargins(0, 0, 0, 0)
         english_font_layout.setSpacing(6)
         english_font_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
+
         # 移除之前添加的 GitHub 按钮相关代码
 
         # GitHub 按钮右侧预留一段固定空白，用于视觉分隔
@@ -550,14 +648,14 @@ class ReferenceFormatterApp(QMainWindow):
         font_settings_layout.addLayout(english_size_layout)
         font_settings_layout.addLayout(chinese_font_layout)
         font_settings_layout.addLayout(chinese_size_layout)
-        font_settings_layout.addLayout(num_format_layout)  
+        font_settings_layout.addLayout(num_format_layout)
         font_settings_layout.addStretch(1)
 
         main_layout.addLayout(font_settings_layout)
 
         # 主内容布局：左侧控制面板 + 右侧输入/输出区域
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(20)  
+        content_layout.setSpacing(20)
 
         # --- 左侧控制面板 - 调整宽度 ---
         control_panel = QFrame()
@@ -574,16 +672,16 @@ class ReferenceFormatterApp(QMainWindow):
         step_title.setStyleSheet("font-size: 13pt; margin-bottom: 10px;")
         control_panel_layout.addWidget(step_title)
         control_panel_layout.addWidget(self._create_separator())
-        
+
         # 按钮容器，用于控制间距
         button_container = QWidget()
         button_layout = QVBoxLayout(button_container)
         button_layout.setContentsMargins(8, 20, 8, 20)  # 增加上下边距
         button_layout.setSpacing(16)  # 增加按钮之间的间距
-        
+
         # 2. 步骤按钮
         # 按钮 1 - 与背景色相同，深色阴影
-        self.preview_button = SmoothButton("1. 检查文献分割", 
+        self.preview_button = SmoothButton("1. 检查文献分割",
                                          bg_color="#F8F5ED",  # 修正为有效的6位颜色代码
                                          hover_color="#F2EDE0",  # 悬停时深一点
                                          text_color="black")  # 白色文字
@@ -593,7 +691,7 @@ class ReferenceFormatterApp(QMainWindow):
         button_layout.addSpacing(35)  # 添加间距
 
         # 按钮 2 - 与背景色相同，深色阴影
-        self.process_button = SmoothButton("2. 统一格式并清洗", 
+        self.process_button = SmoothButton("2. 统一格式并清洗",
                                          bg_color="#F8F5ED",  # 修正为有效的6位颜色代码
                                          hover_color="#F2EDE0",  # 悬停时深一点
                                          text_color="black")  # 白色文字
@@ -603,14 +701,14 @@ class ReferenceFormatterApp(QMainWindow):
         button_layout.addSpacing(35)  # 添加间距
 
         # 按钮 3 - 与背景色相同，深色阴影
-        self.export_button = SmoothButton("3. 生成 Word 文件", 
+        self.export_button = SmoothButton("3. 生成 Word 文件",
                                         bg_color="#F8F5ED",  # 修正为有效的6位颜色代码
                                         hover_color="#F2EDE0",  # 悬停时深一点
                                         text_color="black")  # 白色文字
         self.export_button.clicked.connect(self.export_to_word_file)
         self.export_button.setMinimumHeight(50)  # 增加高度
         button_layout.addWidget(self.export_button)
-        
+
         # 添加按钮容器到主布局
         control_panel_layout.addWidget(button_container)
         control_panel_layout.addStretch(1)  # 将按钮推到顶部
@@ -674,7 +772,7 @@ class ReferenceFormatterApp(QMainWindow):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setObjectName("PreviewTextEdit")
-        
+
         # 添加预览区提示
         preview_placeholder = """
         <div style="color: #666666; font-size: 12px; line-height: 1.5; padding: 15px;">
@@ -723,7 +821,7 @@ class ReferenceFormatterApp(QMainWindow):
         self.english_size_combo.currentTextChanged.connect(self.update_font_info)
         self.chinese_font_combo.currentTextChanged.connect(self.update_font_info)
         self.chinese_size_combo.currentTextChanged.connect(self.update_font_info)
-        self.num_format_combo.currentTextChanged.connect(self.update_font_info)  
+        self.num_format_combo.currentTextChanged.connect(self.update_font_info)
 
     def update_font_info(self):
         """更新字体设置显示，包含编号格式和分割线"""

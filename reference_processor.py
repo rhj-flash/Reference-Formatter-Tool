@@ -221,6 +221,18 @@ class ReferenceProcessor:
     CHINESE_FONT = 'SimSun'
     ENGLISH_FONT = 'Times New Roman'
 
+    # **[START]** 新增：文献格式映射表 (用于下拉框和格式化逻辑)
+    # 请确保您所有的引用格式都定义在这里
+    FORMAT_MAP = {
+        'GB/T 7714 (Author-Year)': {'format': 'author-year', 'style': 'gb7714-2015-author-date'},
+        'GB/T 7714 (Numeric)': {'format': 'numeric', 'style': 'gb7714-2015-numeric'},
+        # 请根据您的实际需求，在此处添加或修改更多的格式
+        'APA 7th Edition': {'format': 'author-year', 'style': 'apa-7th-edition'},
+        'Chicago 17th Edition': {'format': 'author-year', 'style': 'chicago-fullnote-bibliography'},
+    }
+
+    # **[END]** 新增
+
     def __init__(self):
         """
         初始化处理器，编译用于检测序号的正则表达式。

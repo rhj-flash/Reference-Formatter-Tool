@@ -23,7 +23,7 @@ class Color:
     BG_PAPER = "#F8F5ED"         # 大背景（整个窗口底色，带一点暖黄纸张感）
     BG_CARD = "#F8F5ED"          # 顶部大控件背景（HeroCard区域）
     BG_PANEL = "#F8F5ED"         # 左侧控件大背景（ControlPanel区域）
-    BG_STATUS = "#E8E0D5"        # 滚动显示背景（状态栏那块浅灰米色）
+    BG_STATUS = "#F8F5ED"        # 滚动显示背景（状态栏那块浅灰米色）
 
     # 滚动条颜色
     SCROLL_HANDLE = "#E8E0D5"    # 滚动条颜色（和状态栏同色，统一沉稳感）

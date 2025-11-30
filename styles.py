@@ -17,7 +17,7 @@ def build_main_window_qss() -> str:
         background: {c.BG_PAPER}; 
         border: none;
     }}
-
+    
     /* 垂直滚动条 */
     QScrollBar:vertical {{
         background: {c.BG_PAPER};
@@ -101,20 +101,34 @@ def build_main_window_qss() -> str:
         background: {c.BG_PAPER};
     }}
 
-    /* 箭头区域 */
+    /* 下拉箭头区域 */
     QComboBox::drop-down {{
         subcontrol-origin: padding;
         subcontrol-position: center right;
-        width: 28px;                            
-        border: none;                           
-        padding-right: 6px;
+        width: 24px;                            
+        border: none;
+        padding-right: 8px;
+        background: transparent;
     }}
 
-    /* 关键：使用系统默认的箭头样式 */
+    /* 彻底清除 QComboBox::down-arrow 样式 */
     QComboBox::down-arrow {{
-        width: 20px;
-        height: 20px;
-        margin-right: 2px;
+        /* **[START]** 修改：彻底隐藏 QComboBox 箭头 */
+        image: none;
+        background: none;
+        border: none;
+        width: 0px;
+        height: 0px;
+        padding: 0px;
+        margin: 0px;
+        /* **[END]** 修改 */
+    }}
+
+    /* 下拉箭头样式 */
+    QComboBox::down-arrow {{
+        width: 16px;
+        height: 16px;
+        margin-right: 4px;
         image: url(dropdown-arrow.svg);
     }}
 
